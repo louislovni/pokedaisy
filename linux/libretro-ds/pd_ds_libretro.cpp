@@ -191,6 +191,11 @@ int mx=0,my=0;                  // DS pixels each side, across / up and down (on
 // (Black 2 / White 2 leave the map past the DS's view unloaded), and only a strip below, where a game culls the
 // models nearest the camera it wouldn't show (a building cut to one wall). myT + myB = 2 my.
 int myT=0,myB=0;
+// Upright with the controls over the picture's lower part (the panel "WxH:V", V = how much of it from the top is
+// clear): the screen centred in that clear part, the margin below running on under the controls (black past what
+// a slice reaches, MAX_Y). Not for Black / White 2's, whose models near the camera the game itself culls.
+int clearBelow=0;               // DS rows under the screen still clear of the controls: the HUD goes down to them
+int sliceB(){return std::min(myB,MAX_Y);}
 unsigned outW=512,outH=384;     // the frame
 // 0 left, 1 right, 2 above, 3 below: (sx, sy) where the slice sits
 constexpr int SX[4]={-1,1,0,0},SY[4]={0,0,-1,1};
@@ -223,7 +228,7 @@ void on_submit(ds::gpu::Gpu3D& g,const ds::gpu::Vertex* const* v,int n,bool faci
       if(sx<0)seen|=x*128>=int64_t(256-OVERLAP-mx-4-128)*w;
       else if(sx>0)seen|=x*128<=int64_t(OVERLAP+mx+4-128)*w;
       else if(sy<0)seen|=y*96<=int64_t(96-(192-OVERLAP-myT-4))*w;
-      else seen|=y*96>=int64_t(96-(OVERLAP+myB+4))*w;
+      else seen|=y*96>=int64_t(96-(OVERLAP+sliceB()+4))*w;
     }
     if(allL||allR||allT||allB||!seen)continue;
     slices[k]->wide_add(g,cv,n,facing);
@@ -243,22 +248,36 @@ void start(){
   g.wide.submit=on_submit;g.wide.swap=swap;g.wide.latched=latched;g.wide.user=nullptr;
   g.wide.box[0]=g.wide.box[1]=mx?mx+4:0;
   g.wide.box[2]=myT?myT+4:0;
-  g.wide.box[3]=myB?myB+4:0;
+  g.wide.box[3]=myB?sliceB()+4:0;
 }
 // The panel asked for now: the frame's shape and the margins, the slices on or off.
 void read_panel(bool force){
   retro_variable var{"pokedaisy_panel",nullptr};
   const std::string value=environment(RETRO_ENVIRONMENT_GET_VARIABLE,&var)&&var.value?var.value:"";
-  if(!force&&value==panel)return;
-  panel=value;
-  int w=0,h=0,nx=0,ny=0;
-  if(std::sscanf(value.c_str(),"%dx%d",&w,&h)==2&&w>0&&h>0){
-    if(w*3>h*4)nx=std::clamp((384*w/h-512)/4,0,MAX_X);       // wider than 4:3: margins across
-    else if(h*4>w*3)ny=std::clamp((512*h/w-384)/4,0,MAX_Y);  // taller: above and below
+  static bool lastGen5=false;
+  const bool gen5=game&&game->gen==5;
+  if(!force&&value==panel&&gen5==lastGen5)return;
+  panel=value;lastGen5=gen5;
+  int w=0,h=0,v=0,nx=0,ny=0,nT=0,nB=0,nClear=0;
+  const int got=std::sscanf(value.c_str(),"%dx%d:%d",&w,&h,&v);
+  if(got>=2&&w>0&&h>0){
+    if(got==3&&v>0&&v<h&&h*4>w*3&&!gen5){
+      const int full=std::min(512*h/w,384+4*MAX_Y),clear=512*v/w;   // frame rows
+      const int top=std::clamp(clear/2-192,0,2*MAX_Y);
+      nT=top/2;nB=std::max(0,full-384-2*nT)/2;
+      nClear=std::max(0,(clear-2*nT-384)/2);
+      ny=(nT+nB+1)/2;
+    }else{
+      if(got==3&&v>0&&v<h)h=v;   // Black / White 2: the clear part only
+      if(w*3>h*4)nx=std::clamp((384*w/h-512)/4,0,MAX_X);       // wider than 4:3: margins across
+      else if(h*4>w*3)ny=std::clamp((512*h/w-384)/4,0,MAX_Y);  // taller: above and below
+      // Most of the height above: what's ahead, faded out where nothing is drawn.
+      nT=std::min(ny*3/2,MAX_Y);nB=2*ny-nT;
+    }
   }
-  if(nx==mx&&ny==my&&!force)return;
-  mx=nx;my=ny;outW=512+4*mx;outH=384+4*my;
-  myT=std::min(my*3/2,MAX_Y);myB=2*my-myT;
+  if(nx==mx&&ny==my&&nT==myT&&nB==myB&&nClear==clearBelow&&!force)return;
+  mx=nx;my=ny;myT=nT;myB=nB;clearBelow=nClear;
+  outW=512+4*mx;outH=384+2*(myT+myB);
   stop();
   if((mx>0||my>0)&&game)start();
 }
@@ -335,6 +354,7 @@ void emit(const uint32_t* px,bool field3D){
     }else if(sy<0||sy>=384){
       const int y=sy<0?-((-sy+1)/2):sy/2;   // DS row, floor
       const int k=sy<0?2:3;
+      if(y>191+sliceB()||y<-myT){std::fill(row,row+W,0u);continue;}   // past what the slice draws
       // Where nothing is drawn, black rather than the backdrop (a sky colour over the whole width), and the margin
       // fading out to its outer edge: what's ahead goes off into the dark instead of stopping at a flat colour.
       const unsigned span=sy<0?Y0:H-Y0-384,from=sy<0?Y:H-1-Y;   // rows to the outer edge
@@ -1035,7 +1055,7 @@ void present_frame(const void* data) {
     // On a wide frame (EXPAND) with the top screen whole on the stage, the HUD spans the frame, to the phone's edges.
     // Upright, it spans the margin above and the screen: the party and the minimap at the phone's top corners.
     const bool wideHud=(wide::mx>0||wide::my>0) && top.x==0 && top.y==0 && top.w==512 && top.h==384 && arrangement.touch.w==0;
-    const int hudW=wideHud?256+2*wide::mx:256,hudH=wideHud?192+wide::myT:192;
+    const int hudW=wideHud?256+2*wide::mx:256,hudH=wideHud?192+wide::myT+wide::clearBelow:192;
     const int hudRight=wideHud?hudW:pip?(arrangement.touch.x-top.x)*256/top.w:256;
     // Inputs outside the key (icon art loaded late, the snapshot) catch up at refresh(), every 12 frames.
     HudLayerKey key;
@@ -1462,7 +1482,7 @@ RETRO_API bool retro_load_game(const retro_game_info* info){
   pd_ds::set_wild_rates();
   pd_ds::shell.dexArt=std::move(dexArt);
   log(RETRO_LOG_INFO,"PokeDaisy DS: companion %s\n",pd_ds::companionGame!=DsGame::Unsupported?"enabled":"unavailable for this ROM");
-  pd_ds::wide::panel="?";pd_ds::wide::mx=pd_ds::wide::my=pd_ds::wide::myT=pd_ds::wide::myB=0;
+  pd_ds::wide::panel="?";pd_ds::wide::mx=pd_ds::wide::my=pd_ds::wide::myT=pd_ds::wide::myB=pd_ds::wide::clearBelow=0;
   pd_ds::wide::read_panel(true);
   return true;
 }
@@ -1489,7 +1509,7 @@ RETRO_API bool retro_unserialize(const void* data,size_t n){
   if(ok){pd_ds::clear_hud_focus();pd_ds::clear_field_actions();pd_ds::flyJob={};pd_ds::flyPicker=pd_ds::heldQuickConfirm=false;pd_ds::companion=pd_ds::quickOpen=false;pd_ds::shell.picker=-1;pd_ds::shell.summary=false;pd_ds::shell.details=false;pd_ds::shell.dexEntry=0;pd_ds::shell.guideLoadedPage=-1;pd_ui_guide_reset(&pd_ds::shell.frame);pd_ds::shell.placeRow=pd_ds::shell.mapAction=-1;pd_ds::screen_override=0;pd_ds::snapshot={};pd_ds::repelFull=0;pd_ds::tick=0;pd_ds::scene.reset();pd_ds::arrangement={};pd_ds::manualTouch=pd_ds::fieldValid=pd_ds::fieldMenuFlow=false;pd_ds::companionHold=0;}
   return ok;
 }
-RETRO_API void retro_unload_game(){pd_ds::wide::stop();pd_ds::wide::mx=pd_ds::wide::my=pd_ds::wide::myT=pd_ds::wide::myB=0;pd_ds::wide::outW=512;pd_ds::wide::outH=384;ds_unload_game();pd_ds::clear();}
+RETRO_API void retro_unload_game(){pd_ds::wide::stop();pd_ds::wide::mx=pd_ds::wide::my=pd_ds::wide::myT=pd_ds::wide::myB=pd_ds::wide::clearBelow=0;pd_ds::wide::outW=512;pd_ds::wide::outH=384;ds_unload_game();pd_ds::clear();}
 RETRO_API void retro_run(){
   if(!nds)return;
   input_poll_cb();
