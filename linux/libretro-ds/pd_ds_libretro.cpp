@@ -195,7 +195,11 @@ int myT=0,myB=0;
 // clear): the screen centred in that clear part, the margin below running on under the controls (black past what
 // a slice reaches, MAX_Y). Not for Black / White 2's, whose models near the camera the game itself culls.
 int clearBelow=0;               // DS rows under the screen still clear of the controls: the HUD goes down to them
-int sliceB(){return std::min(myB,MAX_Y);}
+int hudTop=0;                   // DS rows at the top the HUD leaves (the phone's status bar)
+// The slice below at half its height (twice the reach) when the margin below runs further than a screen: that far
+// down, it's under the controls.
+int fB=1;
+int sliceB(){return std::min(myB,fB*192-OVERLAP-4);}
 unsigned outW=512,outH=384;     // the frame
 // 0 left, 1 right, 2 above, 3 below: (sx, sy) where the slice sits
 constexpr int SX[4]={-1,1,0,0},SY[4]={0,0,-1,1};
@@ -219,7 +223,9 @@ void on_submit(ds::gpu::Gpu3D& g,const ds::gpu::Vertex* const* v,int n,bool faci
       // The slice left of the screen is clip-space x in [-3w,-w]: moved by +2w (a little less: OVERLAP pixels) it's
       // [-w,w]. Above / below the same in y, which runs up the screen.
       const int64_t x=int64_t(cv[i].pos[0])-sx*(w*(256-OVERLAP)/128);
-      const int64_t y=int64_t(cv[i].pos[1])+sy*(w*(192-OVERLAP)/96);
+      // Screen row r = (1 - y / w) 96; the slice below shows rows (r - (192 - OVERLAP)) / fB of it.
+      const int64_t y=k==3&&fB>1?w-(96*(w-int64_t(cv[i].pos[1]))-(192-OVERLAP)*w)/(96*fB)
+                                :int64_t(cv[i].pos[1])+sy*(w*(192-OVERLAP)/96);
       cv[i].pos[0]=int32_t(x);cv[i].pos[1]=int32_t(y);
       if(w<=0){allL=allR=allT=allB=false;seen=true;continue;}
       allL&=x<-w; allR&=x>w; allB&=y<-w; allT&=y>w;
@@ -228,7 +234,7 @@ void on_submit(ds::gpu::Gpu3D& g,const ds::gpu::Vertex* const* v,int n,bool faci
       if(sx<0)seen|=x*128>=int64_t(256-OVERLAP-mx-4-128)*w;
       else if(sx>0)seen|=x*128<=int64_t(OVERLAP+mx+4-128)*w;
       else if(sy<0)seen|=y*96<=int64_t(96-(192-OVERLAP-myT-4))*w;
-      else seen|=y*96>=int64_t(96-(OVERLAP+sliceB()+4))*w;
+      else seen|=y*96>=int64_t(96-std::min(191,(OVERLAP+sliceB())/fB+4))*w;
     }
     if(allL||allR||allT||allB||!seen)continue;
     slices[k]->wide_add(g,cv,n,facing);
@@ -258,25 +264,29 @@ void read_panel(bool force){
   const bool gen5=game&&game->gen==5;
   if(!force&&value==panel&&gen5==lastGen5)return;
   panel=value;lastGen5=gen5;
-  int w=0,h=0,v=0,nx=0,ny=0,nT=0,nB=0,nClear=0;
-  const int got=std::sscanf(value.c_str(),"%dx%d:%d",&w,&h,&v);
+  int w=0,h=0,v=0,t=0,nx=0,ny=0,nT=0,nB=0,nClear=0,nTop=0;
+  // "WxH", or "WxH:V:T": the controls cover all below V, the phone's status bar all above T.
+  const int got=std::sscanf(value.c_str(),"%dx%d:%d:%d",&w,&h,&v,&t);
   if(got>=2&&w>0&&h>0){
-    if(got==3&&v>0&&v<h&&h*4>w*3&&!gen5){
-      const int full=std::min(512*h/w,384+4*MAX_Y),clear=512*v/w;   // frame rows
-      const int top=std::clamp(clear/2-192,0,2*MAX_Y);
+    if(got>=3&&v>0&&v<h&&h*4>w*3&&!gen5){
+      const int full=std::min(512*h/w,384+4*MAX_Y),clear=512*v/w,skip=got==4?std::clamp(512*t/w,0,clear/2):0;
+      // The screen centred between the status bar and the controls.
+      const int top=std::clamp((skip+clear)/2-192,0,2*MAX_Y);
       nT=top/2;nB=std::max(0,full-384-2*nT)/2;
       nClear=std::max(0,(clear-2*nT-384)/2);
+      nTop=std::min(skip/2,nT);
       ny=(nT+nB+1)/2;
     }else{
-      if(got==3&&v>0&&v<h)h=v;   // Black / White 2: the clear part only
+      if(got>=3&&v>0&&v<h)h=v;   // Black / White 2: the clear part only
       if(w*3>h*4)nx=std::clamp((384*w/h-512)/4,0,MAX_X);       // wider than 4:3: margins across
       else if(h*4>w*3)ny=std::clamp((512*h/w-384)/4,0,MAX_Y);  // taller: above and below
       // Most of the height above: what's ahead, faded out where nothing is drawn.
       nT=std::min(ny*3/2,MAX_Y);nB=2*ny-nT;
     }
   }
-  if(nx==mx&&ny==my&&nT==myT&&nB==myB&&nClear==clearBelow&&!force)return;
-  mx=nx;my=ny;myT=nT;myB=nB;clearBelow=nClear;
+  if(nx==mx&&ny==my&&nT==myT&&nB==myB&&nClear==clearBelow&&nTop==hudTop&&!force)return;
+  mx=nx;my=ny;myT=nT;myB=nB;clearBelow=nClear;hudTop=nTop;
+  fB=myB>MAX_Y?2:1;
   outW=512+4*mx;outH=384+2*(myT+myB);
   stop();
   if((mx>0||my>0)&&game)start();
@@ -292,7 +302,8 @@ uint32_t shade(uint32_t c,uint16_t mb){
 bool ready(int k){return slices[k]&&slices[k]->wide_ready();}
 // The slice's pixel at screen pixel (x, y) (DS pixels, the screen's (0, 0) at its top left).
 uint32_t at(int k,int x,int y){
-  const int px=std::clamp(x-SX[k]*(256-OVERLAP),0,255),py=std::clamp(y-SY[k]*(192-OVERLAP),0,191);
+  const int px=std::clamp(x-SX[k]*(256-OVERLAP),0,255);
+  const int py=std::clamp(k==3?(y-(192-OVERLAP))/fB:y-SY[k]*(192-OVERLAP),0,191);
   return slices[k]->wide_line(py)[px];
 }
 }
@@ -380,10 +391,10 @@ void emit(const uint32_t* px,bool field3D){
       }
     }
   }
-  if(hudW==int(W/2)&&hudH>0&&unsigned(2*hudH)<=H){
+  if(hudW==int(W/2)&&hudH>0&&unsigned(2*(hudH+hudTop))<=H){
     for(unsigned y=0;y<unsigned(2*hudH);++y){
       const uint32_t* src=hud+(y/2)*hudW;
-      uint32_t* row=out+y*W;
+      uint32_t* row=out+(y+2*hudTop)*W;
       for(unsigned x=0;x<W;++x){
         const uint32_t p=src[x/2];
         if(p==QUICK_CLEAR)continue;
@@ -1055,7 +1066,7 @@ void present_frame(const void* data) {
     // On a wide frame (EXPAND) with the top screen whole on the stage, the HUD spans the frame, to the phone's edges.
     // Upright, it spans the margin above and the screen: the party and the minimap at the phone's top corners.
     const bool wideHud=(wide::mx>0||wide::my>0) && top.x==0 && top.y==0 && top.w==512 && top.h==384 && arrangement.touch.w==0;
-    const int hudW=wideHud?256+2*wide::mx:256,hudH=wideHud?192+wide::myT+wide::clearBelow:192;
+    const int hudW=wideHud?256+2*wide::mx:256,hudH=wideHud?192+wide::myT+wide::clearBelow-wide::hudTop:192;
     const int hudRight=wideHud?hudW:pip?(arrangement.touch.x-top.x)*256/top.w:256;
     // Inputs outside the key (icon art loaded late, the snapshot) catch up at refresh(), every 12 frames.
     HudLayerKey key;
@@ -1482,7 +1493,7 @@ RETRO_API bool retro_load_game(const retro_game_info* info){
   pd_ds::set_wild_rates();
   pd_ds::shell.dexArt=std::move(dexArt);
   log(RETRO_LOG_INFO,"PokeDaisy DS: companion %s\n",pd_ds::companionGame!=DsGame::Unsupported?"enabled":"unavailable for this ROM");
-  pd_ds::wide::panel="?";pd_ds::wide::mx=pd_ds::wide::my=pd_ds::wide::myT=pd_ds::wide::myB=pd_ds::wide::clearBelow=0;
+  pd_ds::wide::panel="?";pd_ds::wide::mx=pd_ds::wide::my=pd_ds::wide::myT=pd_ds::wide::myB=pd_ds::wide::clearBelow=pd_ds::wide::hudTop=0;pd_ds::wide::fB=1;
   pd_ds::wide::read_panel(true);
   return true;
 }
@@ -1509,7 +1520,7 @@ RETRO_API bool retro_unserialize(const void* data,size_t n){
   if(ok){pd_ds::clear_hud_focus();pd_ds::clear_field_actions();pd_ds::flyJob={};pd_ds::flyPicker=pd_ds::heldQuickConfirm=false;pd_ds::companion=pd_ds::quickOpen=false;pd_ds::shell.picker=-1;pd_ds::shell.summary=false;pd_ds::shell.details=false;pd_ds::shell.dexEntry=0;pd_ds::shell.guideLoadedPage=-1;pd_ui_guide_reset(&pd_ds::shell.frame);pd_ds::shell.placeRow=pd_ds::shell.mapAction=-1;pd_ds::screen_override=0;pd_ds::snapshot={};pd_ds::repelFull=0;pd_ds::tick=0;pd_ds::scene.reset();pd_ds::arrangement={};pd_ds::manualTouch=pd_ds::fieldValid=pd_ds::fieldMenuFlow=false;pd_ds::companionHold=0;}
   return ok;
 }
-RETRO_API void retro_unload_game(){pd_ds::wide::stop();pd_ds::wide::mx=pd_ds::wide::my=pd_ds::wide::myT=pd_ds::wide::myB=pd_ds::wide::clearBelow=0;pd_ds::wide::outW=512;pd_ds::wide::outH=384;ds_unload_game();pd_ds::clear();}
+RETRO_API void retro_unload_game(){pd_ds::wide::stop();pd_ds::wide::mx=pd_ds::wide::my=pd_ds::wide::myT=pd_ds::wide::myB=pd_ds::wide::clearBelow=pd_ds::wide::hudTop=0;pd_ds::wide::fB=1;pd_ds::wide::outW=512;pd_ds::wide::outH=384;ds_unload_game();pd_ds::clear();}
 RETRO_API void retro_run(){
   if(!nds)return;
   input_poll_cb();
