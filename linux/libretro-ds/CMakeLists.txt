@@ -11,6 +11,7 @@ set(DS ${LR}/DSperate)
 if(NOT EXISTS ${DS}/src/core/nds.h)
   message(FATAL_ERROR "Run git submodule update --init --recursive third_party/dsperate-lr")
 endif()
+include(${ROOT}/third_party/patches/apply_dsperate_patch.cmake)
 foreach(feature DSPERATE_SDL DSPERATE_HEADLESS DSPERATE_TESTS DSPERATE_CHEEVOS DSPERATE_NET DSPERATE_VULKAN)
   set(${feature} OFF CACHE BOOL "" FORCE)
 endforeach()
@@ -65,7 +66,9 @@ target_link_libraries(pokedaisy_ds_libretro PRIVATE pd_ds_presentation dsperate_
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9)
   target_link_libraries(pokedaisy_ds_libretro PRIVATE stdc++fs)
 endif()
-target_link_options(pokedaisy_ds_libretro PRIVATE -Wl,--version-script=${LR}/src/link.T -Wl,--no-undefined)
+if(NOT APPLE)
+  target_link_options(pokedaisy_ds_libretro PRIVATE -Wl,--version-script=${LR}/src/link.T -Wl,--no-undefined)
+endif()
 
 # A self-contained pak should not depend on firmware C++ runtime versions.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")

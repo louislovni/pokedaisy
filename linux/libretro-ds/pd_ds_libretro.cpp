@@ -109,6 +109,187 @@ int layout=0; // 0 top, 1 bottom, 2 side by side, 3 stacked
 uint16_t pixels[512*384];
 uint32_t ui_pixels[341*256];
 
+void geometry(unsigned w,unsigned h);
+// ---- EXPAND (Capsule): the overworld's 3D drawn past the top screen's edges, to the phone's edges ----
+// The frontend's panel ("pokedaisy_panel", WxH) sets the frame's shape: the one-screen stage (512 x 384, the DS's 2x)
+// in the middle, margins left and right on a wide panel, above and below on a tall one. On the field the margins are
+// the 3D of slice engines - the screen's neighbours on that side, fed every polygon the game submits (Gpu3D::wide);
+// elsewhere they are black.
+namespace wide {
+constexpr int OVERLAP=4;        // a slice reaches this far into the screen (its own edge isn't shown)
+constexpr int MAX_X=248,MAX_Y=184;   // DS pixels each side: a slice less its overlap, less a few
+int mx=0,my=0;                  // DS pixels each side, across / up and down; 0 = none
+unsigned outW=512,outH=384;     // the frame
+// 0 left, 1 right, 2 above, 3 below: (sx, sy) where the slice sits
+constexpr int SX[4]={-1,1,0,0},SY[4]={0,0,-1,1};
+std::unique_ptr<ds::gpu::Gpu3D> slices[4];
+std::string panel;
+uint16_t out[(512+4*MAX_X)*384>(512*(384+4*MAX_Y))?(512+4*MAX_X)*384:512*(384+4*MAX_Y)];
+// The HUD over the whole wide frame (DS pixels, 2x on the frame): drawn by present, laid on by emit; 0 = none.
+uint32_t hud[(256+2*MAX_X)*192];
+int hudW=0,hudH=0;   // its size in DS pixels; from the frame's top left
+
+void submit(ds::gpu::Gpu3D& g,const ds::gpu::Vertex* const* v,int n,bool facing,void*){
+  for(int k=0;k<4;++k){
+    if(!slices[k])continue;
+    const int sx=SX[k],sy=SY[k];
+    ds::gpu::Vertex cv[4];
+    bool allL=true,allR=true,allT=true,allB=true,seen=false;
+    for(int i=0;i<n;++i){
+      cv[i]=*v[i];
+      const int64_t w=cv[i].pos[3]&0x00FFFFFF;
+      // The slice left of the screen is clip-space x in [-3w,-w]: moved by +2w (a little less: OVERLAP pixels) it's
+      // [-w,w]. Above / below the same in y, which runs up the screen.
+      const int64_t x=int64_t(cv[i].pos[0])-sx*(w*(256-OVERLAP)/128);
+      const int64_t y=int64_t(cv[i].pos[1])+sy*(w*(192-OVERLAP)/96);
+      cv[i].pos[0]=int32_t(x);cv[i].pos[1]=int32_t(y);
+      if(w<=0){allL=allR=allT=allB=false;seen=true;continue;}
+      allL&=x<-w; allR&=x>w; allB&=y<-w; allT&=y>w;
+      // Only what the margin shows: the slice's columns (rows) within the margin, a few more for edge marking.
+      // Screen x = (x / w + 1) 128, screen y = (1 - y / w) 96.
+      if(sx<0)seen|=x*128>=int64_t(256-OVERLAP-mx-4-128)*w;
+      else if(sx>0)seen|=x*128<=int64_t(OVERLAP+mx+4-128)*w;
+      else if(sy<0)seen|=y*96<=int64_t(96-(192-OVERLAP-my-4))*w;
+      else seen|=y*96>=int64_t(96-(OVERLAP+my+4))*w;
+    }
+    if(allL||allR||allT||allB||!seen)continue;
+    slices[k]->wide_add(g,cv,n,facing);
+  }
+}
+void swap(ds::gpu::Gpu3D& g,void*){for(auto& s:slices)if(s)s->wide_swap(g);}
+void latched(ds::gpu::Gpu3D& g,void*){for(auto& s:slices)if(s)s->wide_render(g);}
+
+void stop(){
+  if(nds){auto& g=nds->gpu3d;g.wide=ds::gpu::Gpu3D::WideHooks{};}
+  for(auto& s:slices)s.reset();
+}
+void start(){
+  if(!nds||(mx<=0&&my<=0))return;
+  for(int k=0;k<4;++k)if((k<2?mx:my)>0)slices[k]=std::make_unique<ds::gpu::Gpu3D>(*nds);
+  auto& g=nds->gpu3d;
+  g.wide.submit=submit;g.wide.swap=swap;g.wide.latched=latched;g.wide.user=nullptr;
+  g.wide.box[0]=g.wide.box[1]=mx?mx+4:0;
+  g.wide.box[2]=g.wide.box[3]=my?my+4:0;
+}
+// The panel asked for now: the frame's shape and the margins, the slices on or off.
+void read_panel(bool force){
+  retro_variable var{"pokedaisy_panel",nullptr};
+  const std::string value=environment(RETRO_ENVIRONMENT_GET_VARIABLE,&var)&&var.value?var.value:"";
+  if(!force&&value==panel)return;
+  panel=value;
+  int w=0,h=0,nx=0,ny=0;
+  if(std::sscanf(value.c_str(),"%dx%d",&w,&h)==2&&w>0&&h>0){
+    if(w*3>h*4)nx=std::clamp((384*w/h-512)/4,0,MAX_X);       // wider than 4:3: margins across
+    else if(h*4>w*3)ny=std::clamp((512*h/w-384)/4,0,MAX_Y);  // taller: above and below
+  }
+  if(nx==mx&&ny==my&&!force)return;
+  mx=nx;my=ny;outW=512+4*mx;outH=384+4*my;
+  stop();
+  if((mx>0||my>0)&&game)start();
+}
+// A 3D colour (RGB666, alpha in bits 24-28) as the top screen shows it: through engine A's master brightness.
+uint16_t shade(uint32_t c,uint16_t mb){
+  uint32_t r=c&63,g=(c>>8)&63,b=(c>>16)&63;
+  const uint32_t mode=mb>>14,f=std::min<uint32_t>(mb&31,16);
+  if(mode==1){r+=((63-r)*f)>>4;g+=((63-g)*f)>>4;b+=((63-b)*f)>>4;}
+  else if(mode==2){r-=(r*f+15)>>4;g-=(g*f+15)>>4;b-=(b*f+15)>>4;}
+  return uint16_t(((r>>1)<<11)|(g<<5)|(b>>1));
+}
+bool ready(int k){return slices[k]&&slices[k]->wide_ready();}
+// The slice's pixel at screen pixel (x, y) (DS pixels, the screen's (0, 0) at its top left).
+uint32_t at(int k,int x,int y){
+  const int px=std::clamp(x-SX[k]*(256-OVERLAP),0,255),py=std::clamp(y-SY[k]*(192-OVERLAP),0,191);
+  return slices[k]->wide_line(py)[px];
+}
+}
+
+// The frame out: as it is, or in the middle of the wide one.
+void emit(const uint16_t* px,bool field3D){
+  using namespace wide;
+  if(mx<=0&&my<=0){geometry(512,384);video(px,512,384,512*2);return;}
+  const unsigned W=outW,H=outH,X0=2*mx,Y0=2*my;
+  geometry(W,H);
+  field3D=field3D&&(mx?ready(0)&&ready(1):ready(2)&&ready(3));
+  uint16_t mb=0;
+  bool engineA=true;
+  for(int e=0;e<2;++e)if(nds->gpu.engine[e].screen()==0){mb=nds->gpu.engine[e].master_bright();engineA=e==0;}
+  // Where no 3D is drawn: the top screen's backdrop (its palette's colour 0), as the 2D engine shows it.
+  uint16_t back;
+  {
+    const uint32_t c=nds->bus.dma_read32(ds::Cpu::ARM9,engineA?0x05000000:0x05000400)&0x7FFF;
+    back=shade(((c&31)<<1)|(((c>>5)&31)<<9)|(((c>>10)&31)<<17),mb);
+  }
+  auto near=[](uint16_t a,uint16_t b){
+    const int dr=int(a>>11)-int(b>>11),dg=int((a>>5)&63)-int((b>>5)&63),db=int(a&31)-int(b&31);
+    return std::abs(dr)<=4&&std::abs(dg)<=8&&std::abs(db)<=4;
+  };
+  auto lit=[](uint32_t c){return ((c>>24)&31)!=0;};
+  for(unsigned Y=0;Y<H;++Y){
+    uint16_t* row=out+Y*W;
+    const int sy=int(Y)-int(Y0);   // stage row
+    if(sy>=0&&sy<384)std::memcpy(row+X0,px+sy*512,512*2);
+    if(!field3D){
+      if(sy<0||sy>=384){std::memset(row,0,W*2);continue;}
+      std::memset(row,0,X0*2);std::memset(row+X0+512,0,X0*2);continue;
+    }
+    if(mx){
+      const int y=sy/2;
+      const uint16_t edgeL=back,edgeR=back;
+      for(unsigned X=0;X<X0;++X){
+        const uint32_t c=at(0,int(X/2)-mx,y);
+        row[X]=lit(c)?shade(c,mb):edgeL;
+        const uint32_t cr=at(1,256+int(X/2),y);
+        row[X0+512+X]=lit(cr)?shade(cr,mb):edgeR;
+      }
+      // The DS outlines the 3D where the screen cuts it (edge marking): a dark line once the picture goes on past
+      // it. The screen's outer column takes the slice's own pixel there - where the next one in shows the slice's
+      // colour too, so it's the 3D and not a text box or the HUD over it.
+      const uint32_t in=at(0,1,y),edge=at(0,0,y);
+      if(lit(in)&&lit(edge)&&near(px[sy*512+2],shade(in,mb)))row[X0]=row[X0+1]=shade(edge,mb);
+      const uint32_t inR=at(1,254,y),edgeR2=at(1,255,y);
+      if(lit(inR)&&lit(edgeR2)&&near(px[sy*512+509],shade(inR,mb)))row[X0+510]=row[X0+511]=shade(edgeR2,mb);
+    }else if(sy<0||sy>=384){
+      const int y=sy<0?-((-sy+1)/2):sy/2;   // DS row, floor
+      const int k=sy<0?2:3;
+      for(unsigned X=0;X<W;++X){
+        const uint32_t c=at(k,int(X/2),y);
+        row[X]=lit(c)?shade(c,mb):back;
+      }
+    }
+  }
+  if(my&&field3D){
+    // The screen's top and bottom rows, the same outline fix.
+    for(int side=0;side<2;++side){
+      const int k=side?3:2,ey=side?191:0,ny=side?190:1;
+      uint16_t* r0=out+(Y0+ey*2)*W+X0;
+      uint16_t* r1=r0+W;
+      for(int x=0;x<256;++x){
+        const uint32_t in=at(k,x,ny),edge=at(k,x,ey);
+        if(lit(in)&&lit(edge)&&near(px[(ny*2)*512+x*2],shade(in,mb)))r0[2*x]=r0[2*x+1]=r1[2*x]=r1[2*x+1]=shade(edge,mb);
+      }
+    }
+  }
+  if(hudW==int(W/2)&&hudH>0&&unsigned(2*hudH)<=H){
+    for(unsigned y=0;y<unsigned(2*hudH);++y){
+      const uint32_t* src=hud+(y/2)*hudW;
+      uint16_t* row=out+y*W;
+      for(unsigned x=0;x<W;++x){
+        const uint32_t p=src[x/2];
+        if(p==QUICK_CLEAR)continue;
+        const unsigned a=p>>24?p>>24:255;
+        const uint16_t old=row[x];
+        unsigned r=(old>>11&31)*255/31,g=(old>>5&63)*255/63,b=(old&31)*255/31;
+        r=(((p>>16)&255)*a+r*(255-a))/255;
+        g=(((p>>8)&255)*a+g*(255-a))/255;
+        b=((p&255)*a+b*(255-a))/255;
+        row[x]=ds_rgb565((r<<16)|(g<<8)|b);
+      }
+    }
+  }
+  hudW=hudH=0;
+  video(out,W,H,W*2);
+}
+
 uint32_t read32(uint32_t a) {
   if (!nds || a<0x02000000 || a>0x023ffffc) return 0;
   return nds->bus.dma_read32(ds::Cpu::ARM9,a);
@@ -197,7 +378,7 @@ bool env(unsigned cmd,void* data) {
 void geometry(unsigned w,unsigned h) {
   if(width==w && height==h)return;
   width=w;height=h;
-  retro_game_geometry g{w,h,512,384,float(w)/h};
+  retro_game_geometry g{w,h,512+4*248,384+4*184,float(w)/h};
   environment(RETRO_ENVIRONMENT_SET_GEOMETRY,&g);
 }
 void refresh() {
@@ -600,7 +781,6 @@ void draw_quick() {
     ds_compose(stage,arrangement,nds->gpu.framebuffer(0),nds->gpu.framebuffer(1));
     stageReady=true;
   }
-  geometry(512,384);
   for(unsigned y=0;y<384;++y)for(unsigned x=0;x<512;++x){
     uint32_t base=stage[y*512+x]&0xffffff;
     base=(base&0xfefefe)>>1;
@@ -613,7 +793,7 @@ void draw_quick() {
     }
     pixels[y*512+x]=ds_rgb565(base);
   }
-  video(pixels,512,384,512*2);
+  emit(pixels,false);
 }
 void draw_strip(uint32_t* out){
   const int focus=drawnBattle.panel==DsBattlePanel::Moves?battleStrip.moveFocus:battleStrip.actionFocus;
@@ -633,7 +813,6 @@ void present(const void* data,unsigned,unsigned,size_t) {
   ds_compose(stage,arrangement,nds->gpu.framebuffer(0),nds->gpu.framebuffer(1),
              fieldValid?fieldFrame:nullptr,showStrip?draw_strip:nullptr);
   stageReady=true;
-  geometry(w,h);
   for(unsigned i=0;i<w*h;++i)pixels[i]=ds_rgb565(stage[i]);
   if(hudCursor<0&&(buttons&(1u<<RETRO_DEVICE_ID_JOYPAD_SELECT))&&arrangement.touch.w>0){
     int cx=arrangement.touch.x+cursor_x*arrangement.touch.w/256;
@@ -648,7 +827,11 @@ void present(const void* data,unsigned,unsigned,size_t) {
      (!game || field_free()) && !fieldMenuFlow &&
      top.w>0 && top.h>0 && !arrangement.floating && !arrangement.modal) {
     if(tick%12==0 || !snapshot.valid)refresh();
-    pd_canvas c;pd_canvas_init(&c,256,192,ui_pixels);
+    // On a wide frame (EXPAND) with the top screen whole on the stage, the HUD spans the frame, to the phone's edges.
+    // Upright, it spans the margin above and the screen: the party and the minimap at the phone's top corners.
+    const bool wideHud=(wide::mx>0||wide::my>0) && top.x==0 && top.y==0 && top.w==512 && top.h==384 && arrangement.touch.w==0;
+    const int hudW=wideHud?256+2*wide::mx:256,hudH=wideHud?192+wide::my:192;
+    pd_canvas c;pd_canvas_init(&c,hudW,hudH,wideHud?wide::hud:ui_pixels);
     pd_snapshot party{};party.valid=snapshot.valid;party.partyCount=std::min(6,int(snapshot.party.size()));
     for(int i=0;i<party.partyCount;++i){
       const auto& m=snapshot.party[i];auto& d=party.party[i];
@@ -680,7 +863,7 @@ void present(const void* data,unsigned,unsigned,size_t) {
     hud_state state{steps,repelFull,pc,wild,-1};
     state.mini=shell.settings.hudSize!=PD_HUD_LARGE;
     const bool pip=arrangement.touch.w>0 && arrangement.touch.x>top.x && arrangement.touch.x<top.x+top.w;
-    const int hudRight=pip?(arrangement.touch.x-top.x)*256/top.w:256;
+    const int hudRight=wideHud?hudW:pip?(arrangement.touch.x-top.x)*256/top.w:256;
     struct HudIcons {const pd_snapshot& party;bool small;};
     HudIcons hudIcons{party,pip&&!state.mini};
     hud_ds_draw(&c,&party,&state,&shell.settings,&hudIcons,[](pd_canvas* c,void* ctx,const pd_mon* m,int x,int y,bool){
@@ -717,9 +900,10 @@ void present(const void* data,unsigned,unsigned,size_t) {
         ds_draw_minimap(c,snapshot,map,x,y,w,h);
       },&hudHits);
     hud_focus_draw(&c,&hudHits,hudCursor);
+    if(wideHud){wide::hudW=hudW;wide::hudH=hudH;}   // laid on the wide frame by emit
     // Scale with the top screen and keep the picture-in-picture touch screen clear.
     const bool doubled=top.w==512 && top.h==384;
-    for(int y=0;y<top.h;++y){
+    for(int y=0;y<top.h && !wideHud;++y){
       const auto* row=ui_pixels+(doubled?y/2:y*192/top.h)*256;
       for(int x=0;x<top.w;++x){
         const uint32_t p=row[doubled?x/2:x*256/top.w];
@@ -735,7 +919,11 @@ void present(const void* data,unsigned,unsigned,size_t) {
       }
     }
   }
-  video(pixels,w,h,w*2);
+  // The field on the one screen, whole: the margins go on with its 3D.
+  const bool field3D=game && arrangement.top.x==0 && arrangement.top.y==0 && arrangement.top.w==512 &&
+    arrangement.top.h==384 && arrangement.touch.w==0 && !arrangement.floating && !arrangement.modal &&
+    !battleActive && !wasInBattle && !scene.dark && scene.hud;
+  emit(pixels,field3D);
 }
 int16_t filtered_input(unsigned p,unsigned d,unsigned i,unsigned id) {
   if(flyCallJob)return 0;
@@ -773,7 +961,9 @@ int16_t filtered_input(unsigned p,unsigned d,unsigned i,unsigned id) {
       if(id==RETRO_DEVICE_ID_POINTER_Y)return (battleTap.y*32768+191)/192;
     }
     int x=input(p,d,i,RETRO_DEVICE_ID_POINTER_X),y=input(p,d,i,RETRO_DEVICE_ID_POINTER_Y);
-    auto pen=ds_pen(arrangement,(x+32767)*512/65535,(y+32767)*384/65535);
+    // Over the wide frame (EXPAND), the stage is its middle 512 columns.
+    auto pen=ds_pen(arrangement,int((x+32767)*int64_t(wide::outW)/65535)-2*wide::mx,
+                    int((y+32767)*int64_t(wide::outH)/65535)-2*wide::my);
     if(id==RETRO_DEVICE_ID_POINTER_PRESSED)return pen.valid?input(p,d,i,id):0;
     if(id==RETRO_DEVICE_ID_POINTER_X)return pen.valid?(pen.x*65535+255)/256-32767:0;
     if(id==RETRO_DEVICE_ID_POINTER_Y)return pen.valid?(pen.y*32768+191)/192:0;
@@ -975,7 +1165,7 @@ RETRO_API void retro_set_input_state(retro_input_state_t cb){pd_ds::input=cb;ds_
 RETRO_API void retro_get_system_info(retro_system_info* info){ds_get_system_info(info);info->library_name="PokeDaisy DS";info->library_version="0.4-one-screen";}
 RETRO_API void retro_get_system_av_info(retro_system_av_info* info){
   ds_get_system_av_info(info);
-  info->geometry={512,384,512,384,4.f/3.f};
+  info->geometry={512,384,512+4*248,384+4*184,4.f/3.f};
 }
 RETRO_API bool retro_load_game(const retro_game_info* info){
   pd_ds::clear();pd_ds::width=512;pd_ds::height=384;
@@ -999,6 +1189,19 @@ RETRO_API bool retro_load_game(const retro_game_info* info){
     pd_ds::companionGame=ds_companion_game(hex);
     pd_ds::soulSilver=!std::strcmp(hex,pd_ds_data::soulSilverSha1);
     pd_ds::battleStyle=ds_battle_style(hex);
+    // Capsule: a French cart (or any other the checksums don't name) is matched by its header.
+    bool frenchSilver=false;
+    const DsGame byHeader=ds_select_cart(reinterpret_cast<const char*>(rom.data()+12),rom[30],&frenchSilver);
+    if(pd_ds::companionGame==DsGame::Unsupported&&byHeader!=DsGame::Unsupported){
+      pd_ds::companionGame=byHeader;pd_ds::soulSilver=frenchSilver;
+      // The battle strip, by family. Platinum's copies the cart's own command art when it matches the US layout and
+      // draws its plates otherwise: either way the commands stay on the one screen.
+      pd_ds::battleStyle=byHeader==DsGame::Johto?ds_battle_style(frenchSilver?pd_ds_data::soulSilverSha1:pd_ds_data::heartGoldSha1):
+        byHeader==DsGame::Black||byHeader==DsGame::White?ds_battle_style(pd_ds_data::blackSha1):
+        byHeader==DsGame::Black2||byHeader==DsGame::White2?ds_battle_style(pd_ds_data::black2Sha1):
+        &ds_platinum_battle_style;
+      pd_ds::game=pk_nds_field_game(reinterpret_cast<const char*>(rom.data()+12),rom[30]);
+    }
     ds_battle_set_base_pp({});
     if(pd_ds::battleStyle)
       pd_ds::game=pk_nds_field_game(reinterpret_cast<const char*>(rom.data()+12),rom[30]);
@@ -1017,6 +1220,8 @@ RETRO_API bool retro_load_game(const retro_game_info* info){
   pd_ds::set_wild_rates();
   pd_ds::shell.dexArt=std::move(dexArt);
   log(RETRO_LOG_INFO,"PokeDaisy DS: companion %s\n",pd_ds::companionGame!=DsGame::Unsupported?"enabled":"unavailable for this ROM");
+  pd_ds::wide::panel="?";pd_ds::wide::mx=pd_ds::wide::my=0;
+  pd_ds::wide::read_panel(true);
   return true;
 }
 RETRO_API void retro_reset(){
@@ -1042,10 +1247,11 @@ RETRO_API bool retro_unserialize(const void* data,size_t n){
   if(ok){pd_ds::clear_hud_focus();pd_ds::clear_field_actions();pd_ds::flyJob={};pd_ds::flyPicker=pd_ds::heldQuickConfirm=false;pd_ds::companion=pd_ds::quickOpen=false;pd_ds::shell.picker=-1;pd_ds::shell.summary=false;pd_ds::shell.details=false;pd_ds::shell.dexEntry=0;pd_ds::shell.guideLoadedPage=-1;pd_ui_guide_reset(&pd_ds::shell.frame);pd_ds::shell.placeRow=pd_ds::shell.mapAction=-1;pd_ds::screen_override=0;pd_ds::snapshot={};pd_ds::repelFull=0;pd_ds::tick=0;pd_ds::scene.reset();pd_ds::arrangement={};pd_ds::manualTouch=pd_ds::fieldValid=pd_ds::fieldMenuFlow=false;pd_ds::companionHold=0;}
   return ok;
 }
-RETRO_API void retro_unload_game(){ds_unload_game();pd_ds::clear();}
+RETRO_API void retro_unload_game(){pd_ds::wide::stop();pd_ds::wide::mx=pd_ds::wide::my=0;pd_ds::wide::outW=512;pd_ds::wide::outH=384;ds_unload_game();pd_ds::clear();}
 RETRO_API void retro_run(){
   if(!nds)return;
   input_poll_cb();
+  if(pd_ds::tick%30==0)pd_ds::wide::read_panel(false);   // the phone turned
   const unsigned previous=pd_ds::old_buttons;
   const bool menuWasOpen=pd_ds::companion || pd_ds::quickOpen || pd_ds::hudCursor>=0;
   pd_ds::controls();

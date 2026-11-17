@@ -1,0 +1,170 @@
+diff --git a/src/core/crypto/aes.c b/src/core/crypto/aes.c
+index 0b380eb..6d183c1 100644
+--- a/src/core/crypto/aes.c
++++ b/src/core/crypto/aes.c
+@@ -399,7 +399,7 @@ static void CipherSw(state_t* state, const uint8_t RoundKey[AES_keyExpSize])
+  * them (every RK356x core; x86-64 with AES-NI), the table-free C above
+  * elsewhere. Same round keys, same result: the DSi AES engine and the NAND
+  * reader run whole titles through this, a block at a time. */
+-#if defined(__aarch64__) && defined(__GNUC__)
++#if defined(__aarch64__) && defined(__GNUC__) && defined(__linux__)
+ #include <arm_neon.h>
+ #include <sys/auxv.h>
+ #define HWCAP_AES_BIT (1UL << 3)
+diff --git a/src/core/gpu/gpu3d.cpp b/src/core/gpu/gpu3d.cpp
+index 0111290..7d20996 100644
+--- a/src/core/gpu/gpu3d.cpp
++++ b/src/core/gpu/gpu3d.cpp
+@@ -845,7 +845,7 @@ void Gpu3D::submit_polygon() {
+   // vertices are untested and forbid the reject, as in the clipper.
+   unsigned oc_all = clipstart == 0 ? 0x3Fu : 0u, oc_any = 0;
+   for (int i = clipstart; i < nverts; ++i) { oc_all &= src[i]->oc; oc_any |= src[i]->oc; }
+-  if (oc_all) { last_strip_poly_ = nullptr; return; }
++  if (oc_all && !wide.submit) { last_strip_poly_ = nullptr; return; }
+ 
+   // Culling from the first three vertices' clip-space positions.
+   const Vertex &v0 = *vptr_[0], &v1 = *vptr_[1], &v2 = *vptr_[2];
+@@ -857,6 +857,9 @@ void Gpu3D::submit_polygon() {
+   const bool facing = dot <= 0;
+   if (dot < 0) { if (!(cur_polygon_attr_ & (1 << 7))) { last_strip_poly_ = nullptr; return; } }
+   else if (dot > 0) { if (!(cur_polygon_attr_ & (1 << 6))) { last_strip_poly_ = nullptr; return; } }
++  // EXPAND: every polygon the screen would draw or reject, before it does (a full-screen viewport only).
++  if (wide.submit && full_viewport()) wide.submit(*this, src, nverts, facing, wide.user);
++  if (oc_all) { last_strip_poly_ = nullptr; return; }
+ 
+   if (oc_any == 0) emit_polygon_unclipped(src, nverts, clipstart, reused_idx, facing);
+   else emit_polygon_clipped(src, nverts, clipstart, reused_idx, lastpolyverts, facing);
+@@ -1064,6 +1067,20 @@ void Gpu3D::box_test(const u32* params) {
+     for (int i = 0; i < 4; ++i) face[i] = cube[f[i]];
+     if (clip_polygon<false>(face, 4, 0, cur_polygon_attr_ & (1 << 12)) > 0) { box_result_ = 1u << 1; return; }
+   }
++  // EXPAND: missed the screen - in the wider view? Its corners mapped from it onto clip space (PokeDaisy's onBoxTest):
++  // x in [-(1 + 2L/256) w, (1 + 2R/256) w] becomes [-w, w]: x' = (256 x - (R - L) w) / (256 + L + R), y the same.
++  const s64 l = wide.box[0], r = wide.box[1], t = wide.box[2], b = wide.box[3];
++  if (!(l | r | t | b) || !full_viewport()) return;
++  for (int i = 0; i < 8; ++i) {
++    const s64 x = cube[i].pos[0], y = cube[i].pos[1], w = cube[i].pos[3];
++    cube[i].pos[0] = static_cast<s32>((256 * x - (r - l) * w) / (256 + l + r));
++    cube[i].pos[1] = static_cast<s32>((192 * y - (t - b) * w) / (192 + t + b));
++  }
++  for (const auto& f : faces) {
++    Vertex face[10];
++    for (int i = 0; i < 4; ++i) face[i] = cube[f[i]];
++    if (clip_polygon<false>(face, 4, 0, cur_polygon_attr_ & (1 << 12)) > 0) { box_result_ = 1u << 1; return; }
++  }
+ }
+ 
+ void Gpu3D::pos_test() {
+@@ -1084,6 +1101,7 @@ void Gpu3D::vec_test(u32 param) {
+ // ---- frame --------------------------------------------------------------------
+ 
+ void Gpu3D::finalise_list() {
++    if (wide.swap) wide.swap(*this, wide.user);
+     if (num_polygons_) {
+       // Opaque polygons first, then translucent; each group stable-sorted by
+       // sort_key unless the flush asked for manual translucent ordering.
+@@ -1186,6 +1204,7 @@ void Gpu3D::vblank() {
+     rstate_.clear_attr1 = clear_attr1_; rstate_.clear_attr2 = clear_attr2_;
+   }
+   swapped_ = false;
++  if (wide.latched) wide.latched(*this, wide.user);
+   if (swap_wait_) { swap_busy_until_ = nds_.sched.now() + 650; swap_wait_ = false; }
+   // No lock strictly needed here, but taken anyway so every write to a bank
+   // role goes through it.
+@@ -1202,6 +1221,54 @@ void Gpu3D::render_frame() {
+   renderer_.render(*this);
+ }
+ 
++// ---- EXPAND slices ---------------------------------------------------------------
++
++void Gpu3D::wide_add(const Gpu3D& src, Vertex* v, int n, bool facing) {
++  // The polygon state the game set for it.
++  cur_polygon_attr_ = src.cur_polygon_attr_;
++  texparam_ = src.texparam_;
++  texpal_ = src.texpal_;
++  viewport_ = src.viewport_;
++  zero_dot_w_limit_ = src.zero_dot_w_limit_;
++  flush_attr_ = src.flush_attr_;
++  poly_mode_ = 0;   // no strip sharing: each polygon stands alone here
++  last_strip_poly_ = nullptr;
++  unsigned all = 0x3F, any = 0;
++  for (int i = 0; i < n; ++i) { v[i].oc = outcode(v[i].pos); all &= v[i].oc; any |= v[i].oc; }
++  if (all) return;
++  const Vertex* ptr[4] = {&v[0], &v[1], &v[2], n > 3 ? &v[3] : &v[0]};
++  if (any == 0) emit_polygon_unclipped(ptr, n, 0, nullptr, facing);
++  else emit_polygon_clipped(ptr, n, 0, nullptr, 0, facing);
++}
++
++void Gpu3D::wide_swap(const Gpu3D& src) {
++  flush_attr_ = src.flush_attr_;
++  // Opaque first, then translucent, sorted as finalise_list does.
++  u32 io = 0, it = num_opaque_;
++  const Polygon* pr = cur_pram();
++  auto& rp = render_polys_[bank_];
++  for (u32 i = 0; i < num_polygons_; ++i) { const Polygon* p = &pr[i]; if (p->translucent) rp[it++] = p; else rp[io++] = p; }
++  std::stable_sort(rp.begin(), rp.begin() + ((flush_attr_ & 1) ? num_opaque_ : num_polygons_),
++                   [](const Polygon* a, const Polygon* b) { return a->sort_key < b->sort_key; });
++  render_count_[bank_] = num_polygons_;
++  wide_pending_ = bank_;
++  bank_ ^= 1;   // two banks: one built while the other waits to be drawn
++  num_polygons_ = num_vertices_ = num_opaque_ = 0;
++}
++
++void Gpu3D::wide_render(const Gpu3D& src) {
++  if (wide_pending_ == 0xFFFF) return;
++  renderer_.sync_all();
++  raster_bank_ = wide_pending_;
++  wide_pending_ = 0xFFFF;
++  rstate_ = src.rstate_;
++  render_identical_ = false;
++  renderer_.render(*this);
++  renderer_.sync_all();
++  wide_frame_ = renderer_.frame_ref(false);
++  for (u32 y = 0; y < 192; ++y) renderer_.sync_line(wide_frame_, static_cast<s32>(y));
++}
++
+ void Gpu3D::set_render_xpos(u16 value, u16 mask) {
+   if (!render_on_.load(std::memory_order_relaxed)) return;
+   render_xpos_ = (render_xpos_ & ~mask) | (value & mask & 0x1FF);
+diff --git a/src/core/gpu/gpu3d.h b/src/core/gpu/gpu3d.h
+index 66a770d..9bd9d8a 100644
+--- a/src/core/gpu/gpu3d.h
++++ b/src/core/gpu/gpu3d.h
+@@ -120,6 +120,28 @@ public:
+   bool idle() const { return !geometry_on_ || flush_request_ || cmd_n_ == 0; }
+   bool swap_pending() const { return flush_request_ != 0 || swap_wait_; }
+ 
++  // EXPAND (Capsule, after PokeDaisy's pk_nds_wide): the 3D drawn past the screen's sides. The host sees every
++  // polygon the game submits (clip space, before the screen's frustum rejects it) and adds it, moved by about a
++  // screen, to engines of its own ("slices") that draw only that, with this engine's registers and textures.
++  struct WideHooks {
++    void (*submit)(Gpu3D& gx, const Vertex* const* v, int n, bool facing, void* user) = nullptr;
++    void (*swap)(Gpu3D& gx, void* user) = nullptr;      // SWAP_BUFFERS finalised a list
++    void (*latched)(Gpu3D& gx, void* user) = nullptr;   // VBlank: the render registers latched for the next raster
++    void* user = nullptr;
++    // A box test that misses the screen is tried again over the screen and this many pixels each side (left, right,
++    // top, bottom): the game culls its models with them, and those past the screen are wanted now.
++    s32 box[4] = {0, 0, 0, 0};
++  };
++  WideHooks wide;
++  bool full_viewport() const { return viewport_[0] == 0 && viewport_[3] == 0 && viewport_[4] == 256 && viewport_[5] == 192; }
++  // On a slice engine: a polygon in clip space (already moved) added to the list being built, with `src`'s
++  // attributes; the list made the one to draw; drawn with `src`'s latched registers; its lines (RGB666 | A5 << 24).
++  void wide_add(const Gpu3D& src, Vertex* v, int n, bool facing);
++  void wide_swap(const Gpu3D& src);
++  void wide_render(const Gpu3D& src);
++  const u32* wide_line(u32 y) const { return wide_frame_.line(y); }
++  bool wide_ready() const { return wide_frame_.out != nullptr; }
++
+   void vblank();            // VCount 192: latch registers, sort, swap buffers
+   void render_frame();      // VCount 215: rasterise the latched frame
+   // Force next frame to rasterise even if unchanged (frameskip left the picture stale).
+@@ -437,6 +459,8 @@ private:
+   void pos_test();
+   void vec_test(u32 param);
+   void reset_render_state();
++  u32 wide_pending_ = 0xFFFF;              // slice: the bank swapped and not drawn yet
++  Renderer3D::FrameRef wide_frame_{};      // slice: the last drawing
+ };
+ 
+ } // namespace ds::gpu
