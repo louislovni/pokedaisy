@@ -310,6 +310,35 @@ uint32_t at(int k,int x,int y){
 }
 
 // The frame out (XRGB8888, the 512 x 384 stage): as it is, or in the middle of the wide one.
+// Off the field (a battle, a menu, a scene the slices can't widen): the margins show the screen itself, blurred and
+// darkened, stretched to cover the frame - its colours carried out to the edges instead of black. The screen is
+// averaged down to TW x TH cells, sampled back up bilinearly.
+constexpr int TW=32,TH=24;
+uint32_t ambientRow(const uint32_t* thumb,unsigned W,unsigned H,unsigned Y,unsigned X0,unsigned Y0,uint32_t* row,
+                    unsigned from,unsigned to){
+  // The thumbnail covers the frame (its shorter side fits), centred on the screen.
+  const unsigned S=std::max((W<<16)/TW,(H<<16)/TH);   // frame pixels per cell, 16.16
+  const int64_t cx=int64_t(X0+256)<<16,cy=int64_t(Y0+192)<<16;
+  const int64_t fy=((int64_t(Y)<<16)-cy)*65536/S+(int64_t(TH)<<15)-32768;
+  const int y0=std::clamp(int(fy>>16),0,TH-1),y1=std::min(y0+1,TH-1);
+  const unsigned wy=fy<0?0:unsigned(fy&0xFFFF);
+  for(unsigned X=from;X<to;++X){
+    const int64_t fx=((int64_t(X)<<16)-cx)*65536/S+(int64_t(TW)<<15)-32768;
+    const int x0=std::clamp(int(fx>>16),0,TW-1),x1=std::min(x0+1,TW-1);
+    const unsigned wx=fx<0?0:unsigned(fx&0xFFFF);
+    uint32_t c[4]={thumb[y0*TW+x0],thumb[y0*TW+x1],thumb[y1*TW+x0],thumb[y1*TW+x1]};
+    uint32_t o=0;
+    for(int sh=0;sh<24;sh+=8){
+      const uint32_t a=(c[0]>>sh)&255,b=(c[1]>>sh)&255,d=(c[2]>>sh)&255,e=(c[3]>>sh)&255;
+      const uint32_t top=(a*(65536-wx)+b*wx)>>16,bot=(d*(65536-wx)+e*wx)>>16;
+      const uint32_t v=(top*(65536-wy)+bot*wy)>>16;
+      o|=((v*9)>>4)<<sh;   // a little over half as bright
+    }
+    row[X]=o;
+  }
+  return 0;
+}
+
 void emit(const uint32_t* px,bool field3D){
   using namespace wide;
   if(mx<=0&&my<=0){geometry(512,384);submit(px,512,384);return;}
@@ -340,13 +369,24 @@ void emit(const uint32_t* px,bool field3D){
     clear=ch(0)|(ch(4)<<8)|(ch(9)<<16)|(((a>>16)&31)<<24);
   }
   auto drawn=[&](uint32_t c){return lit(c)&&(c&0x1F3F3F3Fu)!=clear;};
+  uint32_t thumb[TW*TH];
+  if(!field3D){
+    for(int ty=0;ty<TH;++ty)for(int tx=0;tx<TW;++tx){
+      uint32_t r=0,g=0,b=0;
+      for(int y=ty*16;y<ty*16+16;y+=2)for(int x=tx*16;x<tx*16+16;x+=2){
+        const uint32_t c=px[y*512+x];r+=(c>>16)&255;g+=(c>>8)&255;b+=c&255;
+      }
+      thumb[ty*TW+tx]=((r/64)<<16)|((g/64)<<8)|(b/64);
+    }
+  }
   for(unsigned Y=0;Y<H;++Y){
     uint32_t* row=out+Y*W;
     const int sy=int(Y)-int(Y0);   // stage row
     if(sy>=0&&sy<384)std::memcpy(row+X0,px+sy*512,512*4);
     if(!field3D){
-      if(sy<0||sy>=384){std::fill(row,row+W,0u);continue;}
-      std::fill(row,row+X0,0u);std::fill(row+X0+512,row+W,0u);continue;
+      if(sy<0||sy>=384){ambientRow(thumb,W,H,Y,X0,Y0,row,0,W);continue;}
+      if(X0){ambientRow(thumb,W,H,Y,X0,Y0,row,0,X0);ambientRow(thumb,W,H,Y,X0,Y0,row,X0+512,W);}
+      continue;
     }
     if(mx){
       const int y=sy/2;
