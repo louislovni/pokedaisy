@@ -196,7 +196,8 @@ static bool env_wrap(unsigned cmd, void *data) {
 
 /* ---- the frame: the canvas the frontend sees, and where the game and the overlays are drawn ---- */
 #define CANVAS_MAX_W 640
-#define CANVAS_MAX_H 480
+#define CANVAS_MAX_H 800 // Capsule: 480 upstream; a phone held upright shows EXPAND's map down its whole height
+#define MENU_MAX_H 480   // the companion's own layouts stay within the upstream canvas
 static int CW = 320, CH = 240;       // the canvas now (follows the aspect, see canvas_update)
 static int CWMAX = 320, CHMAX = 240; // the largest canvas: what the buffers hold and what the frontend is told is the maximum
 static int menuW, menuH;
@@ -503,7 +504,7 @@ static bool maskGame;     // while an overlay is up the game sees no keys
 static int key_of(int btn) {
   return btn == PD_BTN_X ? X : btn == PD_BTN_Y ? Y : btn == PD_BTN_L2 ? L2 : btn == PD_BTN_R2 ? R2 : -1;
 }
-static void read_options(void) {} // (kept for the option-update hook: the canvas is read once at load)
+static void read_options(void); // Capsule: follows the panel (after canvas_update)
 
 static void poll_keys(void) {
   held = 0;
@@ -945,7 +946,8 @@ static void canvas_for(int fw, int fh, int kind, int *w, int *h) {
     s--;
   int x = panelW / s, y = panelH / s;
   *w = x < fw ? fw : x > CANVAS_MAX_W ? CANVAS_MAX_W : x;
-  *h = y < fh ? fh : y > CANVAS_MAX_H ? CANVAS_MAX_H : y;
+  const int maxH = kind == CANVAS_MENU ? MENU_MAX_H : CANVAS_MAX_H;
+  *h = y < fh ? fh : y > maxH ? maxH : y;
 }
 
 static void choose_canvas(void) {
@@ -954,7 +956,7 @@ static void choose_canvas(void) {
   if (v && sscanf(v, "%dx%d", &w, &h) != 2)
     w = 320, h = 240;
   CWMAX = w < 320 ? 320 : w > CANVAS_MAX_W ? CANVAS_MAX_W : w;
-  CHMAX = h < 240 ? 240 : h > CANVAS_MAX_H ? CANVAS_MAX_H : h;
+  CHMAX = h < 240 ? 240 : h > MENU_MAX_H ? MENU_MAX_H : h;
   struct retro_system_av_info av;
   mgba_retro_get_system_av_info(&av);
   baseGW = (int)av.geometry.base_width;
@@ -989,7 +991,9 @@ static int want_canvas(void) {
 static void canvas_update(bool notify) {
   int w = menuW, h = menuH, scale = 1;
   unsigned fw = gameW ? gameW : (unsigned)baseGW, fh = gameH ? gameH : (unsigned)baseGH;
-  if (PD_BE_IS_GBA() && !companion && settings.aspect == PD_ASPECT_ORIGINAL && fw && fh) {
+  // Capsule: a game EXPAND can't rebuild (no wide support) gets its own picture too, not a small one in a big canvas.
+  if (!companion && fw && fh &&
+      (PD_BE_IS_GBA() ? settings.aspect == PD_ASPECT_ORIGINAL || !wideSupported : panelW && !wideSupported)) {
     w = (int)fw;
     h = (int)fh;
   } else if (panelW)
@@ -1014,6 +1018,21 @@ static void canvas_update(bool notify) {
     struct retro_game_geometry g = {(unsigned)CW, (unsigned)CH, (unsigned)CWMAX, (unsigned)CHMAX, (float)CW / (float)CH};
     realEnv(RETRO_ENVIRONMENT_SET_GEOMETRY, &g);
   }
+}
+
+/* Capsule: the panel follows the phone's orientation. A GBA game's buffers hold the largest canvas from the start
+ * (choose_canvas), so its canvas can follow a new panel; the Game Boy games keep the one read at load. */
+static void read_options(void) {
+  if (!haveGame || !PD_BE_IS_GBA())
+    return;
+  const char *v = pd_option("pokedaisy_panel");
+  int w = 0, h = 0;
+  if (!v || sscanf(v, "%dx%d", &w, &h) != 2 || w <= 0 || h <= 0 || (w == panelW && h == panelH))
+    return;
+  panelW = w;
+  panelH = h;
+  canvas_for(baseGW, baseGH, CANVAS_MENU, &menuW, &menuH);
+  canvas_update(true);
 }
 
 /* ---- entry points ---- */
