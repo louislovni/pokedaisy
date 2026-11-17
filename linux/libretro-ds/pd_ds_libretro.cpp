@@ -270,8 +270,9 @@ void read_panel(bool force){
   if(got>=2&&w>0&&h>0){
     if(got>=3&&v>0&&v<h&&h*4>w*3&&!gen5){
       const int full=std::min(512*h/w,384+4*MAX_Y),clear=512*v/w,skip=got==4?std::clamp(512*t/w,0,clear/2):0;
-      // The screen centred between the status bar and the controls.
-      const int top=std::clamp((skip+clear)/2-192,0,2*MAX_Y);
+      // The screen down against the controls (its text box just above L and R), the margin above showing what's
+      // ahead; not above the status bar.
+      const int top=std::clamp(std::max(clear-384-8,skip),0,2*MAX_Y);
       nT=top/2;nB=std::max(0,full-384-2*nT)/2;
       nClear=std::max(0,(clear-2*nT-384)/2);
       nTop=std::min(skip/2,nT);
