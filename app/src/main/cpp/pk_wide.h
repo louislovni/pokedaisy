@@ -13,7 +13,7 @@ struct mCore;
 /** The largest window pk_wide_view draws (ZOOM's farthest step: 640 x 360 on a 1080p screen, 360 x ~470 on a phone
  * held upright). */
 #define PK_WIDE_MAX_VIEW_W 800
-#define PK_WIDE_MAX_VIEW_H 800
+#define PK_WIDE_MAX_VIEW_H 1024 // Capsule: 800 upstream; a phone upright shows the map under its controls too
 
 /** Engines (the layouts below): FireRed / LeafGreen (and the CFRU hacks), Emerald, Ruby / Sapphire, every language and
  * revision, and pokeemerald-expansion. */

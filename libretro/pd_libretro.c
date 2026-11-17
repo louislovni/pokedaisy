@@ -196,7 +196,8 @@ static bool env_wrap(unsigned cmd, void *data) {
 
 /* ---- the frame: the canvas the frontend sees, and where the game and the overlays are drawn ---- */
 #define CANVAS_MAX_W 640
-#define CANVAS_MAX_H 800 // Capsule: 480 upstream; a phone held upright shows EXPAND's map down its whole height
+#define CANVAS_MAX_H 1024 // Capsule: 480 upstream; a phone held upright shows EXPAND's map down its whole height, under
+                          // its controls too
 #define MENU_MAX_H 480   // the companion's own layouts stay within the upstream canvas
 static int CW = 320, CH = 240;       // the canvas now (follows the aspect, see canvas_update)
 static int CWMAX = 320, CHMAX = 240; // the largest canvas: what the buffers hold and what the frontend is told is the maximum
@@ -542,6 +543,9 @@ static int heldFrames[NKEYS];
 static int quickBtn = Y, companionBtn = X, hudBtn = -1; // key indices, -1 none (from settings: key_of)
 static unsigned gameKeys; // keys the layer presses for the game (BIKE's SELECT)
 static int gameKeyFrames;
+/* Capsule: the panel rows the HUD keeps to ("WxH:A:B", panel pixels; 0 = all): a phone upright shows the canvas under
+ * its controls and status bar, the HUD stays in the part clear of both. */
+static int hudClipA, hudClipB;
 static int hudOx, hudOy, hudScale = 1; // where draw_hud last put the HUD on the canvas (hud_hit_at)
 static unsigned shortcutKeys, shortcutBlocked;
 static bool shortcutExclusive;
@@ -792,6 +796,22 @@ static void draw_hud(void) {
     ax = (CW - aw) / 2;
     ay = (CH - ah) / 2;
   }
+  // Capsule: within the panel's clear part (the canvas fills the panel's width: rows scale as CW / panelW).
+  if (hudClipB > hudClipA && panelW > 0) {
+    // A canvas shorter than the panel (capped) is shown in its middle: its row 0 is that far down the panel.
+    int shift = ((int)((long)panelH * CW / panelW) - CH) / 2;
+    if (shift < 0)
+      shift = 0;
+    int top = (int)((long)hudClipA * CW / panelW) - shift, bottom = (int)((long)hudClipB * CW / panelW) - shift;
+    if (top > ay) {
+      ah -= top - ay;
+      ay = top;
+    }
+    if (bottom < ay + ah)
+      ah = bottom - ay;
+    if (ah < 64)
+      ah = 64;
+  }
   // SMALL / NORMAL: the mini HUD (a core's canvas is the game's own pixels, shown 3x to 6x); LARGE: the full one.
   hudState.mini = settings.hudSize != PD_HUD_LARGE;
   int scale = canvasScale;
@@ -1019,6 +1039,9 @@ static void choose_canvas(void) {
   baseGH = (int)av.geometry.base_height;
   panelW = panelH = 0;
   v = pd_option("pokedaisy_panel");
+  hudClipA = hudClipB = 0;
+  if (v && sscanf(v, "%dx%d:%d:%d", &panelW, &panelH, &hudClipA, &hudClipB) < 4)
+    hudClipA = hudClipB = 0;
   if (v && sscanf(v, "%dx%d", &panelW, &panelH) == 2 && panelW > 0 && panelH > 0)
     canvas_for(baseGW, baseGH, CANVAS_MENU, &CWMAX, &CHMAX);
   else
@@ -1083,8 +1106,17 @@ static void read_options(void) {
   if (!haveGame || !PD_BE_IS_GBA())
     return;
   const char *v = pd_option("pokedaisy_panel");
-  int w = 0, h = 0;
-  if (!v || sscanf(v, "%dx%d", &w, &h) != 2 || w <= 0 || h <= 0 || (w == panelW && h == panelH))
+  int w = 0, h = 0, a = 0, b = 0;
+  if (!v || sscanf(v, "%dx%d", &w, &h) != 2 || w <= 0 || h <= 0)
+    return;
+  if (sscanf(v, "%dx%d:%d:%d", &w, &h, &a, &b) < 4)
+    a = b = 0;
+  if (a != hudClipA || b != hudClipB) {
+    hudClipA = a;
+    hudClipB = b;
+    hudDrawnKey = 0;
+  }
+  if (w == panelW && h == panelH)
     return;
   panelW = w;
   panelH = h;
