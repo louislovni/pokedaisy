@@ -186,7 +186,11 @@ void geometry(unsigned w,unsigned h);
 namespace wide {
 constexpr int OVERLAP=4;        // a slice reaches this far into the screen (its own edge isn't shown)
 constexpr int MAX_X=248,MAX_Y=184;   // DS pixels each side: a slice less its overlap, less a few
-int mx=0,my=0;                  // DS pixels each side, across / up and down; 0 = none
+int mx=0,my=0;                  // DS pixels each side, across / up and down (on average); 0 = none
+// Upright, the margin above takes most of the height: what's ahead, faded out where the game has drawn nothing
+// (Black 2 / White 2 leave the map past the DS's view unloaded), and only a strip below, where a game culls the
+// models nearest the camera it wouldn't show (a building cut to one wall). myT + myB = 2 my.
+int myT=0,myB=0;
 unsigned outW=512,outH=384;     // the frame
 // 0 left, 1 right, 2 above, 3 below: (sx, sy) where the slice sits
 constexpr int SX[4]={-1,1,0,0},SY[4]={0,0,-1,1};
@@ -218,8 +222,8 @@ void on_submit(ds::gpu::Gpu3D& g,const ds::gpu::Vertex* const* v,int n,bool faci
       // Screen x = (x / w + 1) 128, screen y = (1 - y / w) 96.
       if(sx<0)seen|=x*128>=int64_t(256-OVERLAP-mx-4-128)*w;
       else if(sx>0)seen|=x*128<=int64_t(OVERLAP+mx+4-128)*w;
-      else if(sy<0)seen|=y*96<=int64_t(96-(192-OVERLAP-my-4))*w;
-      else seen|=y*96>=int64_t(96-(OVERLAP+my+4))*w;
+      else if(sy<0)seen|=y*96<=int64_t(96-(192-OVERLAP-myT-4))*w;
+      else seen|=y*96>=int64_t(96-(OVERLAP+myB+4))*w;
     }
     if(allL||allR||allT||allB||!seen)continue;
     slices[k]->wide_add(g,cv,n,facing);
@@ -234,11 +238,12 @@ void stop(){
 }
 void start(){
   if(!nds||(mx<=0&&my<=0))return;
-  for(int k=0;k<4;++k)if((k<2?mx:my)>0)slices[k]=std::make_unique<ds::gpu::Gpu3D>(*nds);
+  for(int k=0;k<4;++k)if((k<2?mx:k==2?myT:myB)>0)slices[k]=std::make_unique<ds::gpu::Gpu3D>(*nds);
   auto& g=nds->gpu3d;
   g.wide.submit=on_submit;g.wide.swap=swap;g.wide.latched=latched;g.wide.user=nullptr;
   g.wide.box[0]=g.wide.box[1]=mx?mx+4:0;
-  g.wide.box[2]=g.wide.box[3]=my?my+4:0;
+  g.wide.box[2]=myT?myT+4:0;
+  g.wide.box[3]=myB?myB+4:0;
 }
 // The panel asked for now: the frame's shape and the margins, the slices on or off.
 void read_panel(bool force){
@@ -253,6 +258,7 @@ void read_panel(bool force){
   }
   if(nx==mx&&ny==my&&!force)return;
   mx=nx;my=ny;outW=512+4*mx;outH=384+4*my;
+  myT=std::min(my*3/2,MAX_Y);myB=2*my-myT;
   stop();
   if((mx>0||my>0)&&game)start();
 }
@@ -276,9 +282,9 @@ uint32_t at(int k,int x,int y){
 void emit(const uint32_t* px,bool field3D){
   using namespace wide;
   if(mx<=0&&my<=0){geometry(512,384);submit(px,512,384);return;}
-  const unsigned W=outW,H=outH,X0=2*mx,Y0=2*my;
+  const unsigned W=outW,H=outH,X0=2*mx,Y0=2*myT;
   geometry(W,H);
-  field3D=field3D&&(mx?ready(0)&&ready(1):ready(2)&&ready(3));
+  field3D=field3D&&(mx?ready(0)&&ready(1):(!myT||ready(2))&&(!myB||ready(3)));
   uint16_t mb=0;
   bool engineA=true;
   for(int e=0;e<2;++e)if(nds->gpu.engine[e].screen()==0){mb=nds->gpu.engine[e].master_bright();engineA=e==0;}
@@ -293,6 +299,16 @@ void emit(const uint32_t* px,bool field3D){
     return std::abs(dr)<=32&&std::abs(dg)<=32&&std::abs(db)<=32;
   };
   auto lit=[](uint32_t c){return ((c>>24)&31)!=0;};
+  // The 3D's clear colour as a slice's lines hold it (RGB666 | A5 << 24, render3d's rgb15_to_666): above and below,
+  // a pixel no polygon drew - a sky colour where the game has left the map unloaded - goes dark like an undrawn one.
+  uint32_t clear;
+  {
+    const uint32_t a=nds->gpu3d.render_state().clear_attr1;
+    const uint32_t c=a&0x7FFF;
+    auto ch=[c](unsigned sh){uint32_t v=(sh==0?(c<<1):(c>>sh))&0x3E;return v?v+1:0u;};
+    clear=ch(0)|(ch(4)<<8)|(ch(9)<<16)|(((a>>16)&31)<<24);
+  }
+  auto drawn=[&](uint32_t c){return lit(c)&&(c&0x1F3F3F3Fu)!=clear;};
   for(unsigned Y=0;Y<H;++Y){
     uint32_t* row=out+Y*W;
     const int sy=int(Y)-int(Y0);   // stage row
@@ -319,9 +335,16 @@ void emit(const uint32_t* px,bool field3D){
     }else if(sy<0||sy>=384){
       const int y=sy<0?-((-sy+1)/2):sy/2;   // DS row, floor
       const int k=sy<0?2:3;
+      // Where nothing is drawn, black rather than the backdrop (a sky colour over the whole width), and the margin
+      // fading out to its outer edge: what's ahead goes off into the dark instead of stopping at a flat colour.
+      const unsigned span=sy<0?Y0:H-Y0-384,from=sy<0?Y:H-1-Y;   // rows to the outer edge
+      const unsigned ramp=std::max(1u,span*2/5);
+      const unsigned f=from>=ramp?256:256*from/ramp;
       for(unsigned X=0;X<W;++X){
         const uint32_t c=at(k,int(X/2),y);
-        row[X]=lit(c)?shade(c,mb):back;
+        uint32_t o=drawn(c)?shade(c,mb):0;
+        if(f<256)o=((((o>>16)&255)*f>>8)<<16)|((((o>>8)&255)*f>>8)<<8)|((o&255)*f>>8);
+        row[X]=o;
       }
     }
   }
@@ -1012,7 +1035,7 @@ void present_frame(const void* data) {
     // On a wide frame (EXPAND) with the top screen whole on the stage, the HUD spans the frame, to the phone's edges.
     // Upright, it spans the margin above and the screen: the party and the minimap at the phone's top corners.
     const bool wideHud=(wide::mx>0||wide::my>0) && top.x==0 && top.y==0 && top.w==512 && top.h==384 && arrangement.touch.w==0;
-    const int hudW=wideHud?256+2*wide::mx:256,hudH=wideHud?192+wide::my:192;
+    const int hudW=wideHud?256+2*wide::mx:256,hudH=wideHud?192+wide::myT:192;
     const int hudRight=wideHud?hudW:pip?(arrangement.touch.x-top.x)*256/top.w:256;
     // Inputs outside the key (icon art loaded late, the snapshot) catch up at refresh(), every 12 frames.
     HudLayerKey key;
@@ -1176,7 +1199,7 @@ int16_t filtered_input(unsigned p,unsigned d,unsigned i,unsigned id) {
     int x=input(p,d,i,RETRO_DEVICE_ID_POINTER_X),y=input(p,d,i,RETRO_DEVICE_ID_POINTER_Y);
     // Over the wide frame (EXPAND), the stage is its middle 512 columns.
     auto pen=ds_pen(arrangement,int((x+32767)*int64_t(wide::outW)/65535)-2*wide::mx,
-                    int((y+32767)*int64_t(wide::outH)/65535)-2*wide::my);
+                    int((y+32767)*int64_t(wide::outH)/65535)-2*wide::myT);
     if(id==RETRO_DEVICE_ID_POINTER_PRESSED)return pen.valid?input(p,d,i,id):0;
     if(id==RETRO_DEVICE_ID_POINTER_X)return pen.valid?(pen.x*65535+255)/256-32767:0;
     if(id==RETRO_DEVICE_ID_POINTER_Y)return pen.valid?(pen.y*32768+191)/192:0;
@@ -1439,7 +1462,7 @@ RETRO_API bool retro_load_game(const retro_game_info* info){
   pd_ds::set_wild_rates();
   pd_ds::shell.dexArt=std::move(dexArt);
   log(RETRO_LOG_INFO,"PokeDaisy DS: companion %s\n",pd_ds::companionGame!=DsGame::Unsupported?"enabled":"unavailable for this ROM");
-  pd_ds::wide::panel="?";pd_ds::wide::mx=pd_ds::wide::my=0;
+  pd_ds::wide::panel="?";pd_ds::wide::mx=pd_ds::wide::my=pd_ds::wide::myT=pd_ds::wide::myB=0;
   pd_ds::wide::read_panel(true);
   return true;
 }
@@ -1466,7 +1489,7 @@ RETRO_API bool retro_unserialize(const void* data,size_t n){
   if(ok){pd_ds::clear_hud_focus();pd_ds::clear_field_actions();pd_ds::flyJob={};pd_ds::flyPicker=pd_ds::heldQuickConfirm=false;pd_ds::companion=pd_ds::quickOpen=false;pd_ds::shell.picker=-1;pd_ds::shell.summary=false;pd_ds::shell.details=false;pd_ds::shell.dexEntry=0;pd_ds::shell.guideLoadedPage=-1;pd_ui_guide_reset(&pd_ds::shell.frame);pd_ds::shell.placeRow=pd_ds::shell.mapAction=-1;pd_ds::screen_override=0;pd_ds::snapshot={};pd_ds::repelFull=0;pd_ds::tick=0;pd_ds::scene.reset();pd_ds::arrangement={};pd_ds::manualTouch=pd_ds::fieldValid=pd_ds::fieldMenuFlow=false;pd_ds::companionHold=0;}
   return ok;
 }
-RETRO_API void retro_unload_game(){pd_ds::wide::stop();pd_ds::wide::mx=pd_ds::wide::my=0;pd_ds::wide::outW=512;pd_ds::wide::outH=384;ds_unload_game();pd_ds::clear();}
+RETRO_API void retro_unload_game(){pd_ds::wide::stop();pd_ds::wide::mx=pd_ds::wide::my=pd_ds::wide::myT=pd_ds::wide::myB=0;pd_ds::wide::outW=512;pd_ds::wide::outH=384;ds_unload_game();pd_ds::clear();}
 RETRO_API void retro_run(){
   if(!nds)return;
   input_poll_cb();
