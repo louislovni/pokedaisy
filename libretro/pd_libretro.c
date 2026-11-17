@@ -621,6 +621,9 @@ static struct hud_hits hudHits;
 static bool hudFocus, hudShown;
 static uint32_t *hudPixels;
 static uint32_t hudDrawnKey;
+/* What hud_draw said when the cached HUD was drawn: hudShown goes false while the HUD is off (a menu, the PC), and a
+ * HUD left as it was (same key) comes back on with it, not only when something in it changed. */
+static bool hudDrawnShown;
 static int hudW, hudH;
 static int fieldFlags, hudFieldFrames;
 
@@ -801,12 +804,13 @@ static void draw_hud(void) {
   if (key != hudDrawnKey || w != hudW || hh != hudH) {
     struct pd_canvas hc;
     pd_canvas_init(&hc, w, hh, hudPixels);
-    hudShown = hud_draw(&hc, &game, &snap, &hudState, &settings, &hudHits);
+    hudDrawnShown = hud_draw(&hc, &game, &snap, &hudState, &settings, &hudHits);
     quick_finish(&hc);
     hudDrawnKey = key;
     hudW = w;
     hudH = hh;
   }
+  hudShown = hudDrawnShown;
   hudOx = ax + (aw - w * scale) / 2;
   hudOy = ay + (ah - hh * scale) / 2;
   hudScale = scale;
