@@ -10,6 +10,10 @@ enum class DsGame { Unsupported, Platinum, Johto, Black, White, Black2, White2 }
 bool ds_unova(DsGame game);
 bool ds_unova_sequel(DsGame game);
 DsGame ds_companion_game(const char* sha1);
+// Capsule (iOS): the French carts the Android app's ports cover, by header code
+// and revision. Sets the addresses the companion reads (US ones for anything
+// else) and returns the cart's game, or Unsupported. *soulSilver is set for SoulSilver.
+DsGame ds_select_cart(const char code[4],int revision,bool* soulSilver);
 // Maps the digest of a known decrypted dump to the digest of the retail dump it
 // is the same ROM as, so every digest check downstream sees one id per game.
 const char* ds_canonical_sha1(const char* sha1);
