@@ -1392,6 +1392,17 @@ static void settings_migrate(void) {
     fprintf(stderr, "Settings moved from %s to %s\n", from, to);
   free(d);
 }
+#ifdef _WIN32
+// Windows (Capsule's build): mGBA's core plays the GBA games too, as on the iPhone, so a save goes between them as is.
+static const char *core_for(const char *path) {
+  const char *ext = strrchr(path, '.');
+  if (ext && (!strcasecmp(ext, ".gba") || !strcasecmp(ext, ".gb") || !strcasecmp(ext, ".gbc")))
+    return "pokedaisy_gbc_libretro.dll";
+  if (ext && !strcasecmp(ext, ".nds"))
+    return "pokedaisy_ds_libretro.dll";
+  return NULL;
+}
+#else
 static const char *core_for(const char *path) {
   const char *ext = strrchr(path, '.');
   if (ext && !strcasecmp(ext, ".gba"))
@@ -1402,6 +1413,7 @@ static const char *core_for(const char *path) {
     return "pokedaisy_ds_libretro.so";
   return NULL;
 }
+#endif
 #ifdef POCKET_DSPERATE
 extern int pd_ds_run(const char *, const char *, int, const char *, SDL_Renderer *, bool (*)(void));
 static bool ds_running(void) { return running != 0; }
@@ -1451,11 +1463,17 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     snprintf(sav, sizeof sav, "%s", saveFile);
     snprintf(backups, sizeof backups, "%s/backups", root);
   } else {
+#ifdef _WIN32
+    // Windows: "Game.sav" for "Game.nds", the iPhone app's name, so Capsule's cloud sync carries it over.
+    const char *dot = strrchr(name, '.');
+    snprintf(sav, sizeof sav, "%s/%.*s.sav", savesDir, (int)(dot ? (size_t)(dot - name) : strlen(name)), name);
+#else
     snprintf(sav, sizeof sav, "%s/%s.sav", savesDir, name);
+#endif
     snprintf(backups, sizeof backups, "%s/pokedaisy-backups", savesDir);
   }
   // DS uses L2 for the Companion and R2 for screen switching. Keep the host's DS bindings separate.
-  const bool dsGame = !strcmp(coreName, "pokedaisy_ds_libretro.so");
+  const bool dsGame = strstr(coreName, "pokedaisy_ds_libretro") != NULL;
   int *hotkeys = dsGame ? hostSet.dsHotkey : hostSet.hotkey;
   // armGBA's states aren't mGBA's: each core its own file.
   snprintf(ss, sizeof ss, "%s/states/%s%s.ss", root, name, strstr(coreName, "_gba_") ? ".armgba" : "");
@@ -1837,7 +1855,15 @@ static const char *base_name(const char *p) {
 static int cmp(const void *a, const void *b) { return strcasecmp(base_name(*(char *const *)a), base_name(*(char *const *)b)); }
 static void exe_dir(const char *argv0) {
   char p[PATH_MAX];
+#ifdef _WIN32
+  DWORD got = GetModuleFileNameA(NULL, p, sizeof p - 1);
+  ssize_t n = got > 0 && got < sizeof p - 1 ? (ssize_t)got : -1;
+  for (char *c = p; n > 0 && *c; c++)
+    if (*c == '\\')
+      *c = '/';
+#else
   ssize_t n = readlink("/proc/self/exe", p, sizeof p - 1);
+#endif
   if (n > 0)
     p[n] = 0;
   else

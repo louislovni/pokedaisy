@@ -168,3 +168,28 @@ index 66a770d..9bd9d8a 100644
  };
  
  } // namespace ds::gpu
+diff --git a/src/core/mem/page_table.h b/src/core/mem/page_table.h
+index 80f978f..4c628fc 100644
+--- a/src/core/mem/page_table.h
++++ b/src/core/mem/page_table.h
+@@ -47,11 +47,20 @@ constexpr u32 PAGE_COUNT = 1u << (32 - PAGE_SHIFT); // 2 Mi entries = 16 MiB of
+ // host_page_of(pointer)) depends on that, or stores into stale code go
+ // unreported.
+ // `owned` false: bytes belong to a HostArena (fastmem.h), freed all at once.
++// Windows has no aligned_alloc: _aligned_malloc, freed by _aligned_free.
++#ifdef _WIN32
++struct PageBufFree { bool owned = true; void operator()(u8* p) const { if (owned) _aligned_free(p); } };
++#else
+ struct PageBufFree { bool owned = true; void operator()(u8* p) const { if (owned) std::free(p); } };
++#endif
+ using PageBuf = std::unique_ptr<u8[], PageBufFree>;
+ inline PageBuf alloc_page_buf(size_t bytes) {
+   const size_t n = (bytes + PAGE_SIZE - 1) & ~size_t{PAGE_SIZE - 1};
++#ifdef _WIN32
++  u8* p = static_cast<u8*>(_aligned_malloc(n, PAGE_SIZE));
++#else
+   u8* p = static_cast<u8*>(std::aligned_alloc(PAGE_SIZE, n));
++#endif
+   if (!p) throw std::bad_alloc();
+   std::memset(p, 0, n);
+   return PageBuf(p);

@@ -1,7 +1,7 @@
 # Our changes to DSperate (third_party/dsperate-lr/DSperate) live in dsperate-capsule.patch: EXPAND's hooks in Gpu3D
 # (every polygon past the backface cull, the lists' swap, the latch at VBlank, the box test over the expanded view),
 # the same port as melonds-pokedaisy.patch's, and the AES unit's hardware check kept to Linux (getauxval), so the core
-# also builds for Apple platforms. Applied once at configure time, like apply_melonds_patch.cmake.
+# also builds for Apple platforms, and page buffers from _aligned_malloc on Windows (no aligned_alloc there). Applied once at configure time, like apply_melonds_patch.cmake.
 #   include(.../apply_dsperate_patch.cmake) after setting DS
 set(PK_DSPERATE_PATCH "${CMAKE_CURRENT_LIST_DIR}/dsperate-capsule.patch")
 execute_process(COMMAND git apply --reverse --check "${PK_DSPERATE_PATCH}"
