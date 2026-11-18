@@ -675,6 +675,50 @@ class SettingsActivity : ComponentActivity() {
         revision++
     }
 
+    // ---- Capsule's cloud saves (capsule build only) ------------------------
+
+    private var capsuleBusy by mutableStateOf<String?>(null)
+
+    /** CAPSULE CLOUD (the account and its saves, capsule/CapsuleCloud.kt) and the Capsule web page (bank, Pokédex, trades). */
+    private fun capsuleRows(): List<SettingRow> {
+        if (!com.pokedaisy.app.capsule.CapsuleCloud.enabled) return emptyList()
+        val cloud = com.pokedaisy.app.capsule.CapsuleCloud
+        val email = cloud.email(this)
+        val done: (String) -> Unit = { text -> runOnUiThread { capsuleBusy = null; revision++; Toast.makeText(this, text, Toast.LENGTH_LONG).show() } }
+        return listOf(
+            SettingRow(
+                "CAPSULE CLOUD", capsuleBusy ?: email?.uppercase() ?: tk("OFF"), opensPage = false,
+                subtitle = "Your saves, the same on iPhone, PC and here",
+            ) {
+                if (capsuleBusy != null) return@SettingRow
+                if (email == null) {
+                    capsuleBusy = "…"
+                    cloud.signIn(this) { who, error ->
+                        if (who != null) {
+                            val report = cloud.sync(this, prefs)
+                            done("Capsule : $who · " + (report?.summary ?: ""))
+                        } else done("Capsule : $error")
+                    }
+                } else {
+                    val sync = "SYNC NOW"
+                    val out = "SIGN OUT"
+                    selector = Selector("CAPSULE CLOUD", listOf(sync, out), sync) { pick ->
+                        if (pick == sync) {
+                            capsuleBusy = "SYNCING…"
+                            Thread { done("Capsule : " + (cloud.sync(this, prefs)?.summary ?: "")) }.start()
+                        } else {
+                            cloud.signOut(this)
+                            revision++
+                        }
+                    }
+                }
+            },
+            SettingRow("CAPSULE WEB", null, subtitle = "Bank, Pokédex and trades in the browser") {
+                openUrl(com.pokedaisy.app.capsule.CapsuleCloud.WEB_PAGE)
+            },
+        )
+    }
+
     // ---- hub --------------------------------------------------------------
 
     /** A sub-page that's only rows (SPEED OPTIONS, DISPLAY OPTIONS), drawn like the hub's. */
@@ -989,6 +1033,7 @@ class SettingsActivity : ComponentActivity() {
                 labelIcon = { GoldTrophy() }, opensPage = true,
             ) { screen = Screen.ACHIEVEMENTS },
             *coopRows().toTypedArray(),
+            *capsuleRows().toTypedArray(),
             groupTitle(tk("CONTROLS")),
             SettingRow(tk("GAME BUTTONS"), null, subtitle = "Key bindings: which button presses A, B, START...", opensPage = true) { screen = Screen.CONTROLS },
             SettingRow(tk("HOTKEYS"), onOff(prefs.hotkeysEnabled), opensPage = true, subtitle = "Button combos for states, FF and more") { screen = Screen.HOTKEYS },

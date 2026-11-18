@@ -276,6 +276,7 @@ class LibraryActivity : ComponentActivity() {
     }
 
     private fun bump() {
+        capsuleSync()
         unsupportedRoms = RomFolder.unsupported(this)
         blockedRoms = RomFolder.blocked(this)
         partialRoms = RomFolder.partial(this)
@@ -381,6 +382,19 @@ class LibraryActivity : ComponentActivity() {
         super.onPause()
         isResumed = false
         setup?.capture?.cancel()
+    }
+
+    /** Capsule's build: the saves synced with the Capsule account on each return here (after a game, too), at most
+     *  every 30 s; a line says what came or went. */
+    private fun capsuleSync() {
+        val cloud = com.pokedaisy.app.capsule.CapsuleCloud
+        if (!cloud.enabled || cloud.email(this) == null) return
+        if (System.currentTimeMillis() - cloud.lastSync(this) < 30_000) return
+        Thread {
+            val report = cloud.sync(applicationContext, prefs) ?: return@Thread
+            if (report.received.isEmpty() && report.sent.isEmpty() && report.conflicts.isEmpty() && report.error == null) return@Thread
+            runOnUiThread { Toast.makeText(this, "Capsule : " + report.summary, Toast.LENGTH_LONG).show() }
+        }.start()
     }
 
     override fun onResume() {

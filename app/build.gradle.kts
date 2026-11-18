@@ -84,6 +84,9 @@ android {
         (findProperty("pokedaisy.versionCode") as String?)?.toIntOrNull()?.let { versionCode = it }
         // Where the in-app updater looks for releases (AppUpdater).
         buildConfigField("String", "UPDATE_REPO", "\"lidor30/pokedaisy\"")
+        // Capsule's cloud saves (capsule/CapsuleCloud.kt): Google's "Desktop app" client, only in the capsule build.
+        buildConfigField("String", "CAPSULE_GOOGLE_CLIENT_ID", "\"\"")
+        buildConfigField("String", "CAPSULE_GOOGLE_CLIENT_SECRET", "\"\"")
         // Whether this build can send crash reports at all (CrashReports.available).
         buildConfigField("boolean", "CRASHLYTICS", crashlytics.toString())
         buildConfigField("String", "SCREENSCRAPER_DEV_ID", "\"${buildSecret("screenscraper.devId", "SCREENSCRAPER_DEV_ID")}\"")
@@ -168,6 +171,8 @@ android {
             initWith(getByName("release"))
             applicationIdSuffix = ".capsule"
             buildConfigField("String", "UPDATE_REPO", "\"louislovni/capsule\"")
+            buildConfigField("String", "CAPSULE_GOOGLE_CLIENT_ID", "\"${buildSecret("capsule.googleClientId", "GOOGLE_DESKTOP_CLIENT_ID")}\"")
+            buildConfigField("String", "CAPSULE_GOOGLE_CLIENT_SECRET", "\"${buildSecret("capsule.googleClientSecret", "GOOGLE_DESKTOP_CLIENT_SECRET")}\"")
             buildConfigField("boolean", "CRASHLYTICS", "false")
             matchingFallbacks += listOf("release")
             // Without its key (a test build), the debug key: installable, but not as an update of a signed one.
