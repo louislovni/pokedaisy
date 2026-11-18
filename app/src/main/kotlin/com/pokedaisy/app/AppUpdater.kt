@@ -13,8 +13,8 @@ import java.net.URL
  */
 object AppUpdater {
 
-    const val REPO = "lidor30/pokedaisy"
-    const val RELEASES_PAGE = "https://github.com/$REPO/releases"
+    val REPO: String = BuildConfig.UPDATE_REPO
+    val RELEASES_PAGE = "https://github.com/$REPO/releases"
 
     class Release(
         val version: String,

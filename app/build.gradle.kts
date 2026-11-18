@@ -79,6 +79,11 @@ android {
         // against the release tag (v<versionName>), Android needs versionCode to grow.
         versionCode = 21
         versionName = "1.6.0"
+        // Capsule's builds (louislovni/capsule) number themselves: -Ppokedaisy.versionName / versionCode.
+        (findProperty("pokedaisy.versionName") as String?)?.let { versionName = it }
+        (findProperty("pokedaisy.versionCode") as String?)?.toIntOrNull()?.let { versionCode = it }
+        // Where the in-app updater looks for releases (AppUpdater).
+        buildConfigField("String", "UPDATE_REPO", "\"lidor30/pokedaisy\"")
         // Whether this build can send crash reports at all (CrashReports.available).
         buildConfigField("boolean", "CRASHLYTICS", crashlytics.toString())
         buildConfigField("String", "SCREENSCRAPER_DEV_ID", "\"${buildSecret("screenscraper.devId", "SCREENSCRAPER_DEV_ID")}\"")
@@ -156,6 +161,17 @@ android {
             applicationIdSuffix = ".dev"
             buildConfigField("boolean", "CRASHLYTICS", "false")
             matchingFallbacks += listOf("debug")
+        }
+        // Capsule's Android build (louislovni/capsule): the release build under its own package id, so it installs beside
+        // PokeDaisy, named Capsule (src/capsule/res), updating from Capsule's releases. `assembleCapsule`.
+        create("capsule") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".capsule"
+            buildConfigField("String", "UPDATE_REPO", "\"louislovni/capsule\"")
+            buildConfigField("boolean", "CRASHLYTICS", "false")
+            matchingFallbacks += listOf("release")
+            // Without its key (a test build), the debug key: installable, but not as an update of a signed one.
+            signingConfig = signingConfigs.getByName(if (keystoreProps != null) "release" else "debug")
         }
         release {
             isMinifyEnabled = false
