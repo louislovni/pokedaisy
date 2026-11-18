@@ -170,7 +170,9 @@ the companion's reads (addresses generated from `gamedata/`: `pd_configs_gen.h`;
 draws it at 320x240 in the OPTION look; `3ds/ctr/` runs GBA games on armGBA (`third_party/armgba`, ratherDashing's 3DS
 fork at `3ds-v0.0.3-alpha`: a recompiler; MPL-2.0, its GPL-2.0-only Gambatte left out, `3ds/emu/gb_none.c`) and Game Boy
 games on libmgba (the same submodule). armGBA sits behind mGBA's own `struct mCore` (`3ds/emu/pd_armgba_core.c`), so the
-shared C (`pk_wide.c`, `linux/*.c`) needs no change for it; the app's `pk_call.c` / `pk_host.c` / `pk_cheats.c` are built
+shared C (`pk_wide.c`, `linux/*.c`) needs no change for it (a third, gpSP 3D at `third_party/gpsp`, EXPERIMENTAL, the library's GBA CORE
+GPSP, the same way: `3ds/emu/pd_gpsp*.c`, linked into one object with only `pd_gpsp.keep`'s names global; code that branches on
+`pd_armgba_is` and else assumes mGBA must check `pd_gpsp_is` too); the app's `pk_call.c` / `pk_host.c` / `pk_cheats.c` are built
 as `*_mgba` there and `3ds/emu/pd_dispatch.c` picks. Code that reaches into mGBA's CPU or renderer checks `pd_armgba_is()`
 first; armGBA's renderer can't be hooked (`pk_wide.c`'s `lineHookless`). 3ds/README.md's "Sound and speed" has the numbers. Its
 tables, font, map layouts, guides (`Guide*.kt` + `GuideAreas*Gen.kt`, by a Kotlin-subset parser in
@@ -2116,11 +2118,21 @@ frame (4-20 ms) is never waited for by the GL thread (`onVsync` returns 0 for `n
 latency - waited for within 60% of a refresh, 45 of 120 were late. (3) FF on the refresh fits its group to the device
 (`FfGroupFit`: a running average of group time; a frame goes only while the smaller group keeps 3/4 of the late one's
 throughput, frames are tried back with a doubling back-off) and SPED-UP divides by the group really run. DS audio is
-resampled by `NDS_FPS` (59.83), not the GBA's. On a screen with several refreshes a frame (120 Hz), a frame drawn a refresh later goes up only on the refresh that starts the
-next frame (`EmulatorEngine.showAtTick` stamped on each published frame, `EmulatorView.readyShowAt`; GitHub #638, 2026-11-16: done within 8 ms it showed for one refresh, slower ones for
-three - DS judder at 1x on a Thor Max, smooth in FF); not yet checked on a device. (4) A GBA game whose frames keep missing the wait (3+ late draws in two 120-frame
+resampled by `NDS_FPS` (59.83), not the GBA's. (4) A GBA game whose frames keep missing the wait (3+ late draws in two 120-frame
 windows: Radical Red, 5-9 ms frames with 12-14 ms ones, GitHub #63) goes the DS way until it closes (`slowFrames`, latched -
 flipping back skips / repeats a frame; the `fps=` line says `paced=1 (slow: not waited for)`).
+**1.6.0's 1x stutter on 120 Hz screens** (2026-11-17, "lag at 1x, fine at 1.5x" from many players): 681a68bb (GitHub #638's
+"up on the refresh that starts the next frame", never checked on a device) was taken out. With it, once a game went
+[slowFrames] (a GBA game within seconds on the Thor at 120 Hz, a DS game always) each frame was replaced before its refresh
+came: on the Thor at 120 Hz, 3,653 of 3,840 FireRed frames and about half of Black's never reached the screen (`unshown=` on
+the `fps=` line), 1 and 0 without it. The DS "top screen stuck white" reports (GitHub #1047) were the same: SoulSilver's boot
+at 120 Hz with DS RESOLUTION 2x left 109-120 of every 120 frames unshown, the top screen on one picture for 10 s and more (a
+white fade, when it stopped on one), 0 without it. Check pacing on a 120 Hz screen with a non-debuggable build
+(`assembleBenchmark`).
+**No method over 10,000 dex code units on a hot path**: ART compiles none past that (at install or in the JIT), so it runs
+interpreted for good - logcat's "Method exceeds compiler instruction limit". `EmulatorEngine.loop` was 7,784 in the 1.6.0
+release (18,500 in a debuggable build, which then ran every frame interpreted); it's `GameRun` now, a method per stage of a
+frame. `python3 scripts/check_dex_methods.py <apk>` lists app methods over 10,000 (fails) and over 8,000.
 **FPS / CPU** (SETTINGS on either screen, SCREEN group, `Prefs.showPerformance`, off): flush in the game screen's
 top-left corner on a small dark box (the HUD's messages moved top-right) - frames the core ran per second
 (`EmulatorEngine.framesRun`, ~60.0 on a 60 / 120 Hz screen, 59.7 on the timer) and the app's share of the whole CPU

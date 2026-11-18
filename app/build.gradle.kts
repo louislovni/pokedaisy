@@ -77,8 +77,8 @@ android {
         targetSdk = 34
         // Bump both for every GitHub release: the updater compares versionName
         // against the release tag (v<versionName>), Android needs versionCode to grow.
-        versionCode = 21
-        versionName = "1.6.0"
+        versionCode = 22
+        versionName = "1.6.1"
         // Capsule's builds (louislovni/capsule) number themselves: -Ppokedaisy.versionName / versionCode.
         (findProperty("pokedaisy.versionName") as String?)?.let { versionName = it }
         (findProperty("pokedaisy.versionCode") as String?)?.toIntOrNull()?.let { versionCode = it }
