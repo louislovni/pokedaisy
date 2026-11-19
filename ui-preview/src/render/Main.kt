@@ -2717,6 +2717,10 @@ fun main(args: Array<String>) {
         *com.pokedaisy.app.companion.TouchColors.entries.map { c ->
             Shot("touch-colors-${c.name.lowercase()}", 2400, 1080, 2.625f, touchScene(2400, 1080, 2.625f, com.pokedaisy.app.companion.TouchControlsStyle(look = com.pokedaisy.app.companion.TouchLook.SOLID, colors = c, opacity = 100)))
         }.toTypedArray(),
+        // Capsule's looks upright, LIQUID GLASS with PRIMARY's tints too.
+        Shot("touch-capsule-upright", 1080, 2400, 2.625f, touchScene(1080, 2400, 2.625f, com.pokedaisy.app.companion.TouchControlsStyle(look = com.pokedaisy.app.companion.TouchLook.CAPSULE, opacity = 100))),
+        Shot("touch-liquid-glass-upright", 1080, 2400, 2.625f, touchScene(1080, 2400, 2.625f, com.pokedaisy.app.companion.TouchControlsStyle(look = com.pokedaisy.app.companion.TouchLook.LIQUID_GLASS, opacity = 100))),
+        Shot("touch-liquid-glass-primary", 2400, 1080, 2.625f, touchScene(2400, 1080, 2.625f, com.pokedaisy.app.companion.TouchControlsStyle(look = com.pokedaisy.app.companion.TouchLook.LIQUID_GLASS, colors = com.pokedaisy.app.companion.TouchColors.PRIMARY, opacity = 100))),
         Shot("touch-console-primary-upright", 1080, 2400, 2.625f, touchScene(1080, 2400, 2.625f, com.pokedaisy.app.companion.TouchControlsStyle(look = com.pokedaisy.app.companion.TouchLook.CONSOLE, colors = com.pokedaisy.app.companion.TouchColors.PRIMARY, opacity = 100))),
         // SKINS: a Delta skin (our own demo) sideways - the game in its screen - and upright (its buttons under the game).
         Shot("touch-skin-side", 2400, 1080, 2.625f, touchScene(2400, 1080, 2.625f, com.pokedaisy.app.companion.TouchControlsStyle(skinGba = DemoSkin.ID), skin = true)),

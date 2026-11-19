@@ -97,8 +97,9 @@ fun touchControlsRows(
         SettingRow(tk("LOOK"), style.look.label, enabled = !skinned, labelBadge = touchStylesBadge(), subtitle = if (skinned) skinNote else "How the buttons are drawn") {
             if (!skinned) set(style.copy(look = TouchLook.entries.after(style.look)))
         },
-        SettingRow(tk("COLORS"), style.colors.label, enabled = !skinned, labelBadge = touchStylesBadge(), subtitle = if (skinned) skinNote else "The buttons' colors") {
-            if (!skinned) set(style.copy(colors = TouchColors.entries.after(style.colors)))
+        // CAPSULE has its own colours (LIQUID GLASS takes A / B / X / Y's as a tint).
+        SettingRow(tk("COLORS"), style.colors.label, enabled = !skinned && style.look != TouchLook.CAPSULE, labelBadge = touchStylesBadge(), subtitle = if (skinned) skinNote else "The buttons' colors") {
+            if (!skinned && style.look != TouchLook.CAPSULE) set(style.copy(colors = TouchColors.entries.after(style.colors)))
         },
         SettingRow(tk("OPACITY"), "${style.opacity}%", subtitle = "How solid the buttons are") {
             set(style.copy(opacity = TouchControlsStyle.OPACITIES.after(style.opacity)))

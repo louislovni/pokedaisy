@@ -47,6 +47,12 @@ enum class TouchLook(val label: String) {
     CONSOLE(tk("CONSOLE")),
     /** Smooth round buttons and a plain font, see-through like GLASS: nothing pixelated. */
     MODERN(tk("MODERN")),
+    /** Capsule's controller (its iPhone skin): a cream pad with a grid of dots whose lit dot follows the thumb, A in
+     * deep green, B / X / Y and the pills cream, all smooth. Solid: [TouchColors] don't apply. */
+    CAPSULE(tk("CAPSULE")),
+    /** Capsule's plain mode on iPhone: frosted see-through glass, a round pad with chevrons and a thumb that leans the
+     * way it's pushed, white words. A / B / X / Y keep [TouchColors]' own colours, as a tint. */
+    LIQUID_GLASS(tk("LIQUID GLASS")),
 }
 
 /**

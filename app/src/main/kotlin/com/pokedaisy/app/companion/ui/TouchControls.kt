@@ -136,6 +136,8 @@ internal class PadPaint(val look: TouchLook, val colors: TouchColors) {
     val raised get() = look == TouchLook.CONSOLE
     /** MODERN: smooth shapes and a plain font, nothing stepped in pixels. */
     val modern get() = look == TouchLook.MODERN
+    /** CAPSULE and LIQUID GLASS: Capsule's own controls ([drawCapsuleControls]). */
+    val capsule get() = look == TouchLook.CAPSULE || look == TouchLook.LIQUID_GLASS
 
     /** [b]'s own colour: its accent, else the body - solid but in GLASS. */
     fun base(b: TouchButton): Color {
@@ -426,9 +428,16 @@ private fun DrawScope.drawTouchControls(
     // Pills of one size share one word size, the largest every one of their words fits (SELECT and START alike).
     val pillSize = placed.items.filter { it.shape == TouchGeometry.Shape.PILL }
         .groupBy { it.w.roundToInt() to it.h.roundToInt() }
-        .mapValues { (_, group) -> group.minOf { labelSize(it, measurer, font, paint.modern) } }
+        .mapValues { (_, group) -> group.minOf { labelSize(it, measurer, font, paint.modern || paint.capsule) } }
     fun sizeFor(item: TouchGeometry.Item) =
         if (item.shape == TouchGeometry.Shape.PILL) pillSize[item.w.roundToInt() to item.h.roundToInt()] else null
+    if (paint.capsule) {
+        for (item in placed.items) {
+            drawCapsuleItem(item, paint, pressed, ffOn, measurer, font, placed.dp, sizeFor(item))
+            drawEditMark(item, selected, editing, step)
+        }
+        return
+    }
     if (paint.modern) {
         for (item in placed.items) {
             val on = pressed?.has(item.button) == true
@@ -531,6 +540,125 @@ private fun DrawScope.drawSmoothCross(item: TouchGeometry.Item, paint: PadPaint,
         drawPath(path, paint.arrow)
     }
     arrow(0, -1); arrow(0, 1); arrow(-1, 0); arrow(1, 0)
+}
+
+// ---- CAPSULE and LIQUID GLASS: Capsule's controls on iPhone ------------------------------------------------------
+
+private val CAPSULE_INK = Color(0xFF18241D)
+private val CAPSULE_GREEN = Color(0xFF2B4535)
+private val CAPSULE_CREAM = Color(0xFFFFFBEE)
+private val CAPSULE_SAND = Color(0xFFE3D7B4)
+
+/** Where a held D-pad points, as -1 / 0 / 1 across and down. */
+private fun padLean(dirs: Int): Offset {
+    var x = 0f; var y = 0f
+    if (dirs and TouchGeometry.KEY_LEFT != 0) x -= 1f
+    if (dirs and TouchGeometry.KEY_RIGHT != 0) x += 1f
+    if (dirs and TouchGeometry.KEY_UP != 0) y -= 1f
+    if (dirs and TouchGeometry.KEY_DOWN != 0) y += 1f
+    if (x != 0f && y != 0f) { x *= 0.7071f; y *= 0.7071f }
+    return Offset(x, y)
+}
+
+/** One control in CAPSULE or LIQUID GLASS (smooth shapes, the plain font, soft shades). */
+private fun DrawScope.drawCapsuleItem(
+    item: TouchGeometry.Item, paint: PadPaint, pressed: TouchPressed?, ffOn: Boolean,
+    measurer: TextMeasurer, font: FontFamily, dp: Float, labelPx: Int?,
+) {
+    val glass = paint.look == TouchLook.LIQUID_GLASS
+    val b = item.button
+    val on = pressed?.has(b) == true
+    val c = Offset(item.cx, item.cy)
+    val hair = max(1f, 1.2f * dp)
+    if (item.shape == TouchGeometry.Shape.CROSS) {
+        val d = item.w
+        val lean = padLean(pressed?.dpad ?: 0)
+        if (glass) {
+            // A frosted disc: a faint body, light from above, a bright rim; a chevron each way; a thumb leaning the way pushed.
+            drawCircle(Color(0x1FFFFFFF), d / 2, c)
+            drawCircle(
+                androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0x40FFFFFF), Color(0x00FFFFFF)), item.top, item.cy),
+                d / 2, c,
+            )
+            drawCircle(Color(0x73FFFFFF), d / 2 - hair / 2, c, style = Stroke(hair))
+            val reach = d * 0.36f
+            val s = d * 0.06f
+            for ((dx, dy) in listOf(0 to -1, 0 to 1, -1 to 0, 1 to 0)) {
+                val tip = Offset(c.x + dx * reach, c.y + dy * reach)
+                val lit = (dx != 0 && lean.x * dx > 0.1f) || (dy != 0 && lean.y * dy > 0.1f)
+                val path = Path().apply {
+                    if (dx != 0) { moveTo(tip.x - dx * s, tip.y - s * 1.4f); lineTo(tip.x, tip.y); lineTo(tip.x - dx * s, tip.y + s * 1.4f) }
+                    else { moveTo(tip.x - s * 1.4f, tip.y - dy * s); lineTo(tip.x, tip.y); lineTo(tip.x + s * 1.4f, tip.y - dy * s) }
+                }
+                drawPath(path, if (lit) Color.White else Color(0xB3FFFFFF), style = Stroke(max(2f, 2.4f * dp), cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+            }
+            val thumb = c + lean * (d * 0.17f)
+            val tr = d * 0.17f
+            drawCircle(if (lean == Offset.Zero) Color(0x2EFFFFFF) else Color(0x59FFFFFF), tr, thumb)
+            drawCircle(
+                androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0x59FFFFFF), Color(0x00FFFFFF)), thumb.y - tr, thumb.y),
+                tr, thumb,
+            )
+            drawCircle(Color(0x80FFFFFF), tr - hair / 2, thumb, style = Stroke(hair))
+            return
+        }
+        // CAPSULE: a cream tile with a 9 x 9 grid of dots; the dot under the thumb lit, glowing.
+        val corner = CornerRadius(d * 0.2f, d * 0.2f)
+        drawRoundRect(Color(0x33000000), Offset(item.left, item.top + 4 * dp), Size(d, d), corner)
+        drawRoundRect(
+            androidx.compose.ui.graphics.Brush.linearGradient(listOf(CAPSULE_CREAM, CAPSULE_SAND), Offset(item.left, item.top), Offset(item.left + d, item.top + d)),
+            Offset(item.left, item.top), Size(d, d), corner,
+        )
+        drawRoundRect(CAPSULE_INK.copy(alpha = 0.2f), Offset(item.left + hair / 2, item.top + hair / 2), Size(d - hair, d - hair), corner, style = Stroke(hair))
+        val inset = d * 0.14f
+        val gap = (d - 2 * inset) / 8f
+        val dot = max(1.5f, d * 0.014f)
+        for (row in 0..8) for (col in 0..8) {
+            drawCircle(CAPSULE_INK.copy(alpha = 0.3f), dot, Offset(item.left + inset + col * gap, item.top + inset + row * gap))
+        }
+        val lit = Offset(item.left + inset + (4 + lean.x * 3f).roundToInt() * gap, item.top + inset + (4 + lean.y * 3f).roundToInt() * gap)
+        if (lean != Offset.Zero) {
+            drawCircle(CAPSULE_GREEN.copy(alpha = 0.18f), gap * 1.1f, lit)
+            drawCircle(CAPSULE_GREEN, gap * 0.45f, lit)
+        } else drawCircle(CAPSULE_GREEN.copy(alpha = 0.55f), gap * 0.32f, lit)
+        return
+    }
+    val round = item.shape == TouchGeometry.Shape.ROUND
+    val sink = if (on && !glass) 2 * dp else 0f
+    val tl = Offset(item.left, item.top + sink)
+    val sz = Size(item.w, item.h)
+    val r = if (round) min(item.w, item.h) / 2 else item.h / 2
+    fun body(brush: androidx.compose.ui.graphics.Brush, at: Offset = tl) =
+        if (round) drawCircle(brush, r, Offset(at.x + sz.width / 2, at.y + sz.height / 2))
+        else drawRoundRect(brush, at, sz, CornerRadius(r, r))
+    fun rim(color: Color) =
+        if (round) drawCircle(color, r - hair / 2, Offset(tl.x + sz.width / 2, tl.y + sz.height / 2), style = Stroke(hair))
+        else drawRoundRect(color, Offset(tl.x + hair / 2, tl.y + hair / 2), Size(sz.width - hair, sz.height - hair), CornerRadius(r - hair / 2, r - hair / 2), style = Stroke(hair))
+    val ink: Color
+    if (glass) {
+        val tint = paint.colors.accent(b)?.let { Color(it) }
+        val base = tint?.copy(alpha = if (on) 0.62f else 0.38f) ?: Color(if (on) 0x59FFFFFF else 0x1FFFFFFF)
+        body(androidx.compose.ui.graphics.SolidColor(base))
+        body(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(if (on) 0x66FFFFFF else 0x40FFFFFF), Color(0x00FFFFFF)), tl.y, tl.y + sz.height * 0.6f))
+        rim(Color(if (on) 0xCCFFFFFF else 0x73FFFFFF))
+        ink = Color.White
+    } else {
+        // CAPSULE: a soft shade under each, a domed face lit from the top left; A deep green, the rest cream.
+        val green = b == TouchButton.A || b == TouchButton.TURBO_A
+        body(androidx.compose.ui.graphics.SolidColor(Color(if (round) 0x3D000000 else 0x26000000)), Offset(item.left, item.top + (if (round) 5 else 3) * dp))
+        val (hi, lo) = if (green) lerp(CAPSULE_GREEN, Color.White, 0.32f) to CAPSULE_GREEN else CAPSULE_CREAM to CAPSULE_SAND
+        val press = if (on) 0.18f else 0f
+        body(
+            androidx.compose.ui.graphics.Brush.radialGradient(
+                listOf(lerp(hi, Color.Black, press), lerp(lo, Color.Black, press)),
+                Offset(tl.x + sz.width * 0.38f, tl.y + sz.height * 0.3f), max(sz.width, sz.height) * 0.95f,
+            ),
+        )
+        rim(if (green) Color(0x33FFFFFF) else CAPSULE_INK.copy(alpha = 0.14f))
+        ink = if (green) Color.White else CAPSULE_INK
+    }
+    val word = if (b == TouchButton.FF && ffOn) (if (glass) PAD_ON else Color(0xFFB07A00)) else ink
+    drawLabel(item.copy(cy = item.cy + sink), measurer, font, word, if (glass) Color(0x99000000) else Color.Transparent, 1f, modern = true, size = labelPx)
 }
 
 /** The plain font MODERN's words are in. */

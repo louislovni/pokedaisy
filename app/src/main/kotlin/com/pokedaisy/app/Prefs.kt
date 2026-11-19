@@ -335,7 +335,10 @@ class Prefs(context: Context) {
      * player's own layouts per orientation ([com.pokedaisy.app.companion.TouchLayout.encode]). */
     var touchControlsStyle: com.pokedaisy.app.companion.TouchControlsStyle
         get() {
-            val d = com.pokedaisy.app.companion.TouchControlsStyle()
+            // Capsule's build: its iPhone plain mode to start with, see-through glass drawn whole (OPACITY 100).
+            val d = com.pokedaisy.app.companion.TouchControlsStyle().let {
+                if (PureAdventure.on) it.copy(look = com.pokedaisy.app.companion.TouchLook.LIQUID_GLASS, opacity = 100) else it
+            }
             fun <T : Enum<T>> pick(all: Array<T>, key: String, default: T) = p.getString(key, null)?.let { n -> all.firstOrNull { it.name == n } } ?: default
             val oldVibration = p.getInt("touch_vibration_level", if (p.getBoolean("touch_vibration", false)) 1 else 0)
             return com.pokedaisy.app.companion.TouchControlsStyle(

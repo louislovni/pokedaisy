@@ -631,6 +631,8 @@ internal val trSettings: Map<String, Tr> = mapOf(
     "FUCHSIA" to Tr(ja = "ピンク", fr = "FUCHSIA", de = "FUCHSIA", it = "FUCSIA", es = "FUCSIA", br = "FÚCSIA", pt = "FÚCSIA", ko = "푸크시아"),
     "RETRO" to Tr(ja = "レトロ", fr = "RÉTRO", de = "RETRO", it = "RETRÒ", es = "RETRO", br = "RETRÔ", pt = "RETRO", ko = "레트로"),
     "MODERN" to Tr(ja = "モダン", fr = "MODERNE", de = "MODERN", it = "MODERNO", es = "MODERNO", br = "MODERNO", pt = "MODERNO", ko = "모던"),
+    "CAPSULE" to Tr(ja = "カプセル", fr = "CAPSULE", de = "CAPSULE", it = "CAPSULE", es = "CAPSULE", br = "CAPSULE", pt = "CAPSULE", ko = "캡슐"),
+    "LIQUID GLASS" to Tr(ja = "リキッドグラス", fr = "VERRE LIQUIDE", de = "FLÜSSIGGLAS", it = "VETRO LIQUIDO", es = "CRISTAL LÍQUIDO", br = "VIDRO LÍQUIDO", pt = "VIDRO LÍQUIDO", ko = "리퀴드 글래스"),
     "OLD SCHOOL" to Tr(ja = "レトロ 4しょく", fr = "À L'ANCIENNE", de = "KLASSISCH", it = "VECCHIA SCUOLA", es = "CLÁSICO", br = "ANTIGO", pt = "ANTIGO", ko = "올드스쿨"),
     "PRIMARY" to Tr(ja = "4しょく", fr = "PRIMAIRE", de = "BUNT", it = "PRIMARI", es = "PRIMARIOS", br = "PRIMÁRIAS", pt = "PRIMÁRIAS", ko = "원색"),
     "COLORS" to Tr(ja = "いろ", fr = "COULEURS", de = "FARBEN", it = "COLORI", es = "COLORES", br = "CORES", pt = "CORES", ko = "색상"),
