@@ -632,8 +632,9 @@ static bool save_backup(const char *sav, const char *dir) {
     snprintf(path, sizeof path, "%s/%s%s.%s", dir, stem, stamp, ext);
     ok = write_file(path, d, n, true);
   }
-  // The newest 10 stay (a new one counts as the newest).
-  for (int i = ok && write ? 9 : 10; ok && i < count; i++) {
+  // The newest 10 stay (a new one counts as the newest); 20 in a pure build, where each save made in the game is one.
+  const int keep = pure ? 20 : 10;
+  for (int i = ok && write ? keep - 1 : keep; ok && i < count; i++) {
     snprintf(path, sizeof path, "%s/%s", dir, list[i]);
     unlink(path);
   }
@@ -1361,25 +1362,26 @@ struct save_baseline {
   unsigned char *data;
   size_t size;
 };
-static void sram_write(const char *sav, struct save_baseline *copy, bool sync) {
+/* Returns whether it wrote (the game saved since the last call). */
+static bool sram_write(const char *sav, struct save_baseline *copy, bool sync) {
   static unsigned char *now;
   static size_t nowSize;
   size_t n = save_image(NULL);
   if (!n)
-    return;
+    return false;
   if (n > nowSize) {
     free(now);
     now = malloc(n);
     nowSize = now ? n : 0;
     if (!now)
-      return;
+      return false;
   }
   save_image(now);
   if (n == copy->size && !memcmp(now, copy->data, n))
-    return;
+    return false;
   if (!write_file(sav, now, n, sync)) {
     notice("Save write failed");
-    return;
+    return false;
   }
   unsigned char *previous = copy->data;
   size_t previousSize = copy->size;
@@ -1387,6 +1389,7 @@ static void sram_write(const char *sav, struct save_baseline *copy, bool sync) {
   copy->size = n;
   now = previous;
   nowSize = previousSize;
+  return true;
 }
 // The settings the old host kept in DATA/settings.ini become the core's (SAVES/pokedaisy/settings.ini), once.
 static void settings_migrate(void) {
@@ -1530,6 +1533,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
   frame_texture();
   // The battery save: the file's bytes into the core's, and written back whenever they change.
   struct save_baseline sramCopy = {0};
+  int savePointDue = 0; // pure build: the frame the save made in the game is backed up
   {
     size_t n = save_image(NULL), fn;
     unsigned char *d = n ? read_file(sav, &fn, 64u << 20) : NULL;
@@ -1835,8 +1839,12 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
       }
     }
     emuMs = (double)(SDL_GetPerformanceCounter() - t) * 1000.0 / SDL_GetPerformanceFrequency() / runs;
-    if (++frames % 120 == 0)
-      sram_write(sav, &sramCopy, true);
+    if (++frames % 120 == 0 && sram_write(sav, &sramCopy, true) && pure)
+      savePointDue = frames + 600; // the game saved: kept as a backup once it has settled, 10 s on
+    if (savePointDue && frames >= savePointDue) {
+      savePointDue = 0;
+      save_backup(sav, backups);
+    }
     present_game(NULL);
     if (maxFrames && frames >= maxFrames) {
       if (shot && !capture(shot))

@@ -1078,6 +1078,9 @@ class EmulatorEngine(
     private var vw = 0
     private var vh = 0
 
+    /** Capsule's save points (the loop's 10 s checks), one at a time. */
+    private val savePoints = java.util.concurrent.Executors.newSingleThreadExecutor()
+
     private fun loop(rom: File, save: File, resume: File?) {
         emuJobs.clear()   // the last game's
         SaveBackups.snapshot(save)
@@ -1162,8 +1165,15 @@ class EmulatorEngine(
         slowFrames = false
         audioFallback = false
         val run = GameRun(sampleRate, track, trackGain)
+        // Capsule's builds (PureAdventure): every save the player makes in the game is kept as a backup (RESTORE
+        // BACKUP), checked every 10 s off this thread; SaveBackups only copies a save that differs from the newest.
+        var savePointCheck = System.nanoTime()
         try {
             while (running) {
+                if (PureAdventure.on && System.nanoTime() - savePointCheck > 10_000_000_000L) {
+                    savePointCheck = System.nanoTime()
+                    savePoints.execute { SaveBackups.snapshot(save) }
+                }
                 if (!run.beforeFrame()) continue
                 run.runCore()
                 run.afterCore()

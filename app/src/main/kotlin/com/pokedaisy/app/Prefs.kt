@@ -876,7 +876,7 @@ class Prefs(context: Context) {
 
     /** SAVE BACKUPS > KEEP PER GAME: how many backups a game keeps, newest first. */
     var saveBackupsKeep: Int
-        get() = p.getInt("save_backups_keep", 10)   // SaveBackups.KEEP
+        get() = p.getInt("save_backups_keep", if (PureAdventure.on) 20 else 10)   // SaveBackups.KEEP; 20 in Capsule's, where each in-game save is one
         set(v) = p.edit().putInt("save_backups_keep", v).apply()
 
     /** [file]'s own save folder (the library menu's SAVE FOLDER); null = [SavesLocation.saveFor]'s search. */
