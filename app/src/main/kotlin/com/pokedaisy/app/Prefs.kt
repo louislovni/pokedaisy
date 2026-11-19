@@ -98,7 +98,7 @@ class Prefs(context: Context) {
     /** Where fast-forward applies: SMART (1x on menus and the region map) or NORMAL. */
     /** REWIND: the last ~20 s kept for the rewind hotkey (memory and a little CPU while on). */
     var rewind: Boolean
-        get() = p.getBoolean("rewind", false)
+        get() = !PureAdventure.on && p.getBoolean("rewind", false)
         set(v) = p.edit().putBoolean("rewind", v).apply()
 
     var ffMode: FfMode
@@ -282,7 +282,7 @@ class Prefs(context: Context) {
     /** Remembered speed-cycle index per ROM (keyed by CRC32). */
     /** BOSS RETRY: a state as each trainer battle starts, offered back after a loss (BattleRetryAsk). */
     var battleRetry: Boolean
-        get() = p.getBoolean("battle_retry", false)
+        get() = !PureAdventure.on && p.getBoolean("battle_retry", false)
         set(v) = p.edit().putBoolean("battle_retry", v).apply()
 
     /** SHINY ALERT: on, and its hunt's count of wild battles per ROM (since the last shiny, or since it was turned on). */
@@ -471,7 +471,7 @@ class Prefs(context: Context) {
     /** The CHEATS master switch (cheats/Cheats.kt): off, no cheat reaches the game,
      * whatever each one is set to. Off by default. */
     var cheatsEnabled: Boolean
-        get() = p.getBoolean("cheats_enabled", false)
+        get() = !PureAdventure.on && p.getBoolean("cheats_enabled", false)
         set(v) = p.edit().putBoolean("cheats_enabled", v).apply()
 
     /** Co-op relay override ([com.pokedaisy.app.companion.coop.CoopRelay]): null = the build's relay. */

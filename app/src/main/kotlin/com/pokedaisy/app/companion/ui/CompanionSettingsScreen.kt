@@ -208,7 +208,7 @@ fun CompanionSettingsScreen(
                         SettingRow(tk("HOTKEYS"), if (settings.hotkeysEnabled) tk("ON") else tk("OFF")) {
                             settings.setHotkeysEnabled(!settings.hotkeysEnabled); tick++
                         },
-                    ) + Hotkeys.Action.entries.map { action ->
+                    ) + Hotkeys.Action.entries.filter(com.pokedaisy.app.PureAdventure::offers).map { action ->
                         val title = action.title
                         SettingRow(title, bindingValue(capture, title, settings.hotkeyBindings()[action]), enabled = settings.hotkeysEnabled, labelBadge = action.badge) {
                             capture?.toggle(title) {
@@ -586,7 +586,7 @@ private fun homeRows(
         },
         // Keeps the last ~20 s; the REWIND HOLD hotkey plays them backwards.
         if (s.rewindSupported) {
-            SettingRow(tk("REWIND"), onOff(s.rewind)) { s.setRewind(!s.rewind); changed() }
+            if (!com.pokedaisy.app.PureAdventure.on) SettingRow(tk("REWIND"), onOff(s.rewind)) { s.setRewind(!s.rewind); changed() } else null
         } else null,
         // SCENE SPEEDS, FF MODE and FF MUSIC: set once and rarely touched, on their own page.
         SettingRow(tk("SPEED OPTIONS"), null, subtitle = "Scene speeds, FF mode and FF music", opensPage = true) { navigate(Page.SPEED) },
@@ -737,12 +737,12 @@ private fun homeRows(
             if (s.fieldPoisonSupported) { s.setFieldPoison(!s.fieldPoison); changed() }
         },
         // A state as each trainer battle starts; after a loss the card asks to go back to it (BattleRetryAsk).
-        SettingRow(
+        if (!com.pokedaisy.app.PureAdventure.on) SettingRow(
             tk("BOSS RETRY"), onOff(s.battleRetry),
             labelBadge = NewFeatures.badge(NewFeatures.BOSS_RETRY), subtitle = "Lost a trainer battle? Try it again",
         ) {
             s.setBattleRetry(!s.battleRetry); changed()
-        },
+        } else null,
         // A shiny wild foe said out loud, FF and turbo stopped (ShinyHunt.kt); the subtitle counts the hunt's wild battles.
         SettingRow(
             tk("SHINY ALERT"), if (s.shinyAlertSupported) onOff(s.shinyAlert) else tk("N/A"),
@@ -771,7 +771,7 @@ private fun homeRows(
         // Every map lets the player run (buildings too); FireRed / Emerald engines.
         SettingRow(tk("RUN INDOORS"), if (s.runIndoorsSupported) onOff(s.runIndoors) else tk("N/A"), enabled = s.runIndoorsSupported) { if (s.runIndoorsSupported) { s.setRunIndoors(!s.runIndoors); changed() } },
         // This game's cheats on / off (the codes are typed or imported in the top screen's Settings).
-        SettingRow(tk("CHEATS"), cheatsValue(s), opensPage = true) { navigate(Page.CHEATS) },
+        if (!com.pokedaisy.app.PureAdventure.on) SettingRow(tk("CHEATS"), cheatsValue(s), opensPage = true) { navigate(Page.CHEATS) } else null,
         groupTitle(tk("SCREEN")),
         // The game at the GBA's 3:2, stretched to fill the top screen, or WIDE (the overworld drawn past
         // its edges); WIDE is tagged BETA, or NOT YET on a game it doesn't know (which shows it as ORIGINAL).

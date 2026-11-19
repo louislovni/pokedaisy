@@ -797,7 +797,7 @@ class SettingsActivity : ComponentActivity() {
                 }
             },
             // Keeps the last ~20 s; the REWIND HOLD hotkey plays them backwards.
-            SettingRow(tk("REWIND"), if (prefs.rewind) tk("ON") else tk("OFF")) { prefs.rewind = !prefs.rewind; revision++ },
+            if (!PureAdventure.on) SettingRow(tk("REWIND"), if (prefs.rewind) tk("ON") else tk("OFF")) { prefs.rewind = !prefs.rewind; revision++ } else null,
             // FF MODE and FF MUSIC: set once and rarely touched, on their own page (the companion's has SCENE SPEEDS too).
             SettingRow(tk("SPEED OPTIONS"), null, subtitle = "FF mode and FF music", opensPage = true) { screen = Screen.SPEED },
             groupTitle(tk("SOUND")),
@@ -1023,7 +1023,7 @@ class SettingsActivity : ComponentActivity() {
             SettingRow(tk("FOLDERS"), null, opensPage = true, subtitle = "Where ROMs, saves and states live", labelBadge = com.pokedaisy.app.companion.NewFeatures.badge(com.pokedaisy.app.companion.NewFeatures.ROMS_FOLDERS)) { screen = Screen.FOLDERS },
             SettingRow(tk("HIDDEN GAMES"), RomFolder.hiddenRoms(this@SettingsActivity, prefs).size.takeIf { it > 0 }?.toString() ?: tk("NONE"), opensPage = true) { screen = Screen.HIDDEN },
             // A game's GameShark / Action Replay / CodeBreaker codes, on their own page.
-            SettingRow(tk("CHEATS"), onOff(prefs.cheatsEnabled), opensPage = true) { screen = Screen.CHEATS },
+            if (!PureAdventure.on) SettingRow(tk("CHEATS"), onOff(prefs.cheatsEnabled), opensPage = true) { screen = Screen.CHEATS } else null,
             // The tools (PATCH A ROM, LINK PLAY, SAVE EDITOR, TRADE SAVES) are the library's TOOLS tab, not rows here (the user's
             // call, 2026-11-03: they have a tab of their own).
             groupTitle(tk("ONLINE")),
@@ -2020,10 +2020,11 @@ class SettingsActivity : ComponentActivity() {
                         tk("HOTKEYS"), if (on) tk("ON") else tk("OFF"), selected = false, m, height = m.rowHeight * 1.2f,
                         labelWeight = 0.5f, divider = true,
                     ) { capture.cancel(); prefs.hotkeysEnabled = !on; revision++ }
-                    Hotkeys.Action.entries.forEachIndexed { i, action ->
+                    val actions = Hotkeys.Action.entries.filter(PureAdventure::offers)
+                    actions.forEachIndexed { i, action ->
                         KeyBindRow(
                             action.title, hotkeys.rawBindings[action], capture, m, small,
-                            divider = i < Hotkeys.Action.entries.lastIndex, enabled = on, labelBadge = action.badge,
+                            divider = i < actions.lastIndex, enabled = on, labelBadge = action.badge,
                         ) {
                             com.pokedaisy.app.companion.KeyCapture.Request(
                                 action.title, chord = true,

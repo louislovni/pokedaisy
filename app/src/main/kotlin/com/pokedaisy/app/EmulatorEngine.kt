@@ -2138,7 +2138,7 @@ class EmulatorEngine(
     private fun applyCheats() {
         cheatsDirty = false
         // A DS game: Action Replay DS codes, into melonDS's own engine (cheats.DsCheats).
-        val text = if (gba || nds) cheatText else ""
+        val text = if ((gba || nds) && !PureAdventure.on) cheatText else ""
         val n = if (nds) {
             val w = com.pokedaisy.app.cheats.DsCheats.fromText(text)
             MgbaCore.pkNdsCheats(w.words, w.lengths)
@@ -2282,6 +2282,15 @@ class EmulatorEngine(
                 sleepLock.notifyAll()
             }
             return
+        }
+        if (PureAdventure.on) {
+            // One save per game: whatever asked for a state, nothing is saved or loaded.
+            pendingSave = -1
+            pendingLoad = -1
+            pendingUndoSave = false
+            pendingUndoLoad = false
+            pendingRetrySave = false
+            pendingRetryLoad = false
         }
         val save = pendingSave
         if (save >= 0) {

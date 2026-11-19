@@ -615,6 +615,7 @@ interface CompanionSettings {
  * CARD (the TRAINER CARD) and ACHIEVEMENTS (RetroAchievements) start off the
  * bar, under the MORE tab. */
 val COMPANION_TABS = listOf("PARTY", "DEX", "MAP", "ITEMS", "BOXES", "GUIDE", "NUZLOCKE", "CARD", "STATES", "ACHIEVEMENTS")
+    .filter(com.pokedaisy.app.PureAdventure::offersTab)
 val DEFAULT_COMPANION_TABS = listOf("PARTY", "DEX", "MAP", "ITEMS", "GUIDE")
 
 /** Tabs next to SETTINGS: six chips in all is as many as fit. During a

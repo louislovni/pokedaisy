@@ -412,7 +412,7 @@ fun QuickMenu(state: QuickMenuState, snapshot: SnapshotView, actions: QuickActio
         label = "quick-menu-fan",
     )
     if (!state.open && (fan == 0f || state.gone)) return
-    val items = QuickAction.entries.filter { it in shown && actions.offered(it) }
+    val items = QuickAction.entries.filter { it in shown && actions.offered(it) && com.pokedaisy.app.PureAdventure.offers(it) }
     val repelSteps = actions.repelSteps()
     val dark = if (QuickAction.FLASH in shown) actions.flashDark() else null
     state.items = items
@@ -841,7 +841,7 @@ fun quickMenuRows(
         },
         SettingRow(tk("LABELS"), onOff(labels), subtitle = "Each action's name under its icon") { setLabels(!labels) },
         groupTitle(tk("SHOW")),
-    ) + QuickAction.entries.map { a ->
+    ) + QuickAction.entries.filter(com.pokedaisy.app.PureAdventure::offers).map { a ->
         val badge = when (a) {
             QuickAction.FLASH -> NewFeatures.badge(NewFeatures.QUICK_FLASH)
             QuickAction.FLIGHT -> NewFeatures.badge(NewFeatures.FREE_FLIGHT)

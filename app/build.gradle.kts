@@ -86,6 +86,8 @@ android {
         buildConfigField("String", "UPDATE_REPO", "\"lidor30/pokedaisy\"")
         // Capsule's cloud saves (capsule/CapsuleCloud.kt): Google's "Desktop app" client, only in the capsule build.
         buildConfigField("String", "CAPSULE_GOOGLE_CLIENT_ID", "\"\"")
+        // Capsule's build: no save states, rewind or cheats (PureAdventure.kt).
+        buildConfigField("boolean", "PURE_ADVENTURE", "false")
         buildConfigField("String", "CAPSULE_GOOGLE_CLIENT_SECRET", "\"\"")
         // Whether this build can send crash reports at all (CrashReports.available).
         buildConfigField("boolean", "CRASHLYTICS", crashlytics.toString())
@@ -171,6 +173,7 @@ android {
             initWith(getByName("release"))
             applicationIdSuffix = ".capsule"
             buildConfigField("String", "UPDATE_REPO", "\"louislovni/capsule\"")
+            buildConfigField("boolean", "PURE_ADVENTURE", "true")
             buildConfigField("String", "CAPSULE_GOOGLE_CLIENT_ID", "\"${buildSecret("capsule.googleClientId", "GOOGLE_DESKTOP_CLIENT_ID")}\"")
             buildConfigField("String", "CAPSULE_GOOGLE_CLIENT_SECRET", "\"${buildSecret("capsule.googleClientSecret", "GOOGLE_DESKTOP_CLIENT_SECRET")}\"")
             buildConfigField("boolean", "CRASHLYTICS", "false")

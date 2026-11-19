@@ -380,6 +380,13 @@ static bool down(int k) { return (pressed & (1u << k)) != 0; }
 /* Hotkeys: a button per action, set on the host menu's HOTKEYS page (host.ini hk_*). FF and rewind act while held,
  * the states on the press. A hotkey's button never reaches the game. The keyboard keeps its own (Space, R, F2, F4). */
 enum { HK_FF, HK_REWIND, HK_SAVE, HK_LOAD, HK_ACTIONS };
+/* POCKET_PURE (Capsule's Windows build): one save per game, the game's own. No save states, no rewind: their menu
+ * rows, hotkeys and keys are gone. */
+#ifdef POCKET_PURE
+static const bool pure = true;
+#else
+static const bool pure = false;
+#endif
 static const char *const hotkeyIds[HK_ACTIONS] = {"ff", "rewind", "savestate", "loadstate"};
 static unsigned hotkeyMask;
 // The game's own buttons and the menu's stay theirs: A, B, START, SELECT, the D-pad (and the stick's), MENU.
@@ -448,7 +455,7 @@ static void host_load(void) {
     if (sscanf(line, "ff_speed=%d", &v) == 1)
       hostSet.ffSpeed = v == 0 || (v >= 2 && v <= 8) ? v : 0;
     if (sscanf(line, "rewind=%d", &v) == 1)
-      hostSet.rewind = v != 0;
+      hostSet.rewind = v != 0 && !pure;
     if (sscanf(line, "lcd=%d", &v) == 1)
       hostSet.lcd = v != 0;
     if (sscanf(line, "swap_ab=%d", &v) == 1)
@@ -507,7 +514,7 @@ static unsigned hotkeys_held(const int *hotkeys, unsigned modifier, unsigned *la
   for (int i = 0; i < HK_ACTIONS; i++) {
     int k = hotkeys[i];
     // REWIND's button is the game's while REWIND is off (L2 to start with: the core's own buttons may be on it).
-    if (k < 0 || (i == HK_REWIND && !hostSet.rewind))
+    if (k < 0 || (i == HK_REWIND && !hostSet.rewind) || (pure && i != HK_FF))
       continue;
     unsigned bit = 1u << k;
     if (bit == modifier)
@@ -528,6 +535,8 @@ static unsigned hotkeys_held(const int *hotkeys, unsigned modifier, unsigned *la
   }
   if (held & (1u << FFKEY))
     on |= 1u << HK_FF;
+  if (pure)
+    return on;
   if (held & (1u << RWKEY))
     on |= 1u << HK_REWIND;
   if (down(SAVEKEY))
@@ -1309,6 +1318,8 @@ static void panel_follow(void) {
   }
 }
 static bool state_file(const char *ss, bool save) {
+  if (pure)
+    return false;
   if (save) {
     size_t n = core.serialize_size();
     void *d = n ? malloc(n) : NULL;
@@ -1577,15 +1588,27 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     snprintf(rows[M_SWAP], 40, "A/B BUTTONS  %s", hostSet.swapAB ? "SWAPPED" : "NORMAL");
     snprintf(rows[M_HOTKEYS], 40, "HOTKEYS");
     snprintf(rows[M_QUIT], 40, fromList ? "QUIT TO GAME LIST" : "QUIT");
-    for (int i = 0; i < M_COUNT; i++)
-      rowPtrs[i] = rows[i];
+    // The rows shown, each mapped to its M_ id (without states and rewind in a pure build).
+    int menuMap[M_COUNT], menuRows = 0;
+    for (int i = 0; i < M_COUNT; i++) {
+      if (pure && (i == M_SAVE || i == M_LOAD || i == M_REWIND))
+        continue;
+      rowPtrs[menuRows] = rows[i];
+      menuMap[menuRows++] = i;
+    }
+    // HOTKEYS' rows likewise: FAST FORWARD and the MODIFIER only, in a pure build.
+    int hkMap[HK_ACTIONS + 1], hkRowCount = 0;
     for (int i = 0; i < HK_ACTIONS; i++) {
       snprintf(hkRows[i], 40, "%s  %s", hkNames[i], capturing == i ? "..." : hotkey_label(hotkeys[i]));
-      hkPtrs[i] = hkRows[i];
+      if (pure && i != HK_FF)
+        continue;
+      hkPtrs[hkRowCount] = hkRows[i];
+      hkMap[hkRowCount++] = i;
     }
     snprintf(hkRows[HK_ACTIONS], 40, "MODIFIER  %s",
              capturing == HK_ACTIONS ? "..." : hotkey_label(hostSet.modifier));
-    hkPtrs[HK_ACTIONS] = hkRows[HK_ACTIONS];
+    hkPtrs[hkRowCount] = hkRows[HK_ACTIONS];
+    hkMap[hkRowCount++] = HK_ACTIONS;
     menuConsumed &= held;
     if (inputReset || menuKey || menuChordDown) {
       modifierPending = modifierUsed = false;
@@ -1600,7 +1623,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
       confirming = 0;
       capturing = -1;
       if (menuOpen) {
-        pd_menu_init(&menu, "POKEDAISY", rowPtrs, M_COUNT);
+        pd_menu_init(&menu, "POKEDAISY", rowPtrs, menuRows);
         menu.overlay = true;
       }
     }
@@ -1699,7 +1722,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
       if (down(B))
         hkPage = false;
       if (down(A)) {
-        capturing = hkMenu.selected;
+        capturing = hkMap[hkMenu.selected];
         hkMenu.title = "PRESS A BUTTON";
         notice(capturing == HK_ACTIONS ? "SELECT: select / off   B: cancel" : "B: cancel   SELECT: off");
       }
@@ -1711,7 +1734,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
       if (down(B))
         menuOpen = false;
       if (down(A)) {
-        switch (menu.selected) {
+        switch (menuMap[menu.selected]) {
         case M_RESUME:
           menuOpen = false;
           break;
@@ -1752,7 +1775,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
           break;
         case M_HOTKEYS:
           hkPage = true;
-          pd_menu_init(&hkMenu, "HOTKEYS", hkPtrs, HK_ACTIONS + 1);
+          pd_menu_init(&hkMenu, "HOTKEYS", hkPtrs, hkRowCount);
           hkMenu.overlay = true;
           break;
         case M_QUIT:

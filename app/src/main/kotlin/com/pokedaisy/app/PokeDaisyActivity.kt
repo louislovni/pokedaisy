@@ -5512,7 +5512,7 @@ class PokeDaisyActivity : Activity() {
         if (!::touchControls.isInitialized || !::view.isInitialized) return
         val off = HashSet<com.pokedaisy.app.companion.TouchButton>()
         if (!view.wide) off += com.pokedaisy.app.companion.TouchButton.ZOOM
-        if (romIsNds || romIs3ds) off += com.pokedaisy.app.companion.TouchButton.REWIND
+        if (romIsNds || romIs3ds || PureAdventure.on) off += com.pokedaisy.app.companion.TouchButton.REWIND
         if (romBlocked != null) off += com.pokedaisy.app.companion.TouchButton.QUICK_MENU
         if (touchControls.unavailable != off) touchControls.unavailable = off
     }
@@ -6217,6 +6217,7 @@ class PokeDaisyActivity : Activity() {
 
     private fun handleHotkey(e: Hotkeys.Event) {
         if (!::engine.isInitialized) return
+        if (!PureAdventure.offers(e.action)) return
         if (romIs3ds && n3dsHotkey(e)) return
         when (e.action) {
             Hotkeys.Action.SAVE_STATE -> if (e.pressed) if (!coopRefuses()) engine.requestSaveState(engine.currentSlot)

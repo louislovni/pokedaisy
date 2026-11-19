@@ -1239,7 +1239,7 @@ class LibraryActivity : ComponentActivity() {
                 add(RomMenuItem(tr("DEFAULT SAVE FOLDER"), LibraryIcons.FolderOff) { setGameSaveFolder(rom, null) })
             }
             // The game's cheats, on Settings' CHEATS page.
-            add(RomMenuItem(tr("CHEATS"), LibraryIcons.Code, opens = true) {
+            if (!PureAdventure.on) add(RomMenuItem(tr("CHEATS"), LibraryIcons.Code, opens = true) {
                 startActivity(Intent(this@LibraryActivity, SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_CHEATS_ROM, rom.absolutePath))
             })
             // A shortcut straight into the game, on Android's home screen (GitHub #182).
