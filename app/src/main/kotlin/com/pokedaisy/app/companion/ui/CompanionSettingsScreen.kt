@@ -613,7 +613,7 @@ private fun homeRows(
             if (s.wildEncountersSupported) { s.setWildEncounters(if (s.wildEncounters == 0) 100 else 0); changed() }
         },
         // A text box's words appear at once, nothing else sped up (InstantText.kt: the game's text routine patched).
-        SettingRow(
+        if (com.pokedaisy.app.PureAdventure.on) null else SettingRow(
             tk("INSTANT TEXT"), if (s.instantTextSupported) onOff(s.instantText) else tk("N/A"),
             enabled = s.instantTextSupported, labelBadge = NewFeatures.badge(NewFeatures.INSTANT_TEXT),
         ) {
@@ -642,7 +642,7 @@ private fun homeRows(
         },
         // A TM stays in the bag after it teaches a move, as an HM does (ReusableTms.kt: the ROM's own check patched).
         // A game whose own TMs never run out (ReusableTms.BUILT_IN) shows ON, greyed, and says so.
-        SettingRow(
+        if (com.pokedaisy.app.PureAdventure.on) null else SettingRow(
             tk("REUSABLE TMS"),
             when { s.reusableTmsBuiltIn -> tk("ON"); s.reusableTmsSupported -> onOff(s.reusableTms); else -> tk("N/A") },
             enabled = s.reusableTmsSupported && !s.reusableTmsBuiltIn,
@@ -652,7 +652,7 @@ private fun homeRows(
             if (s.reusableTmsSupported) { s.setReusableTms(!s.reusableTms); changed() }
         },
         // A REPEL running low gets another of its kind on top, from the bag (RepelRefill.kt). Two values: a tap flips it.
-        SettingRow(
+        if (com.pokedaisy.app.PureAdventure.on) null else SettingRow(
             tk("AUTO REFILL"), if (s.repelRefillSupported) onOff(s.repelRefill) else tk("N/A"),
             enabled = s.repelRefillSupported, labelBadge = NewFeatures.badge(NewFeatures.REPEL_REFILL),
             subtitle = "Another REPEL goes on before one runs out",
@@ -661,7 +661,7 @@ private fun homeRows(
         },
         // The field moves (a tree, a rock, the water...) with the badge alone: the game's own move check patched to take
         // the first Pokémon when nobody knows the move (HmFree.kt); the companion's FLY and FLASH follow it.
-        SettingRow(
+        if (com.pokedaisy.app.PureAdventure.on) null else SettingRow(
             tk("NO HMS NEEDED"), if (s.hmFreeSupported) onOff(s.hmFree) else tk("N/A"),
             enabled = s.hmFreeSupported, labelBadge = NewFeatures.badge(NewFeatures.HM_FREE),
             subtitle = "Field moves with the badge alone",
@@ -670,7 +670,7 @@ private fun homeRows(
         },
         // The whole party gains EXP from a win (ExpShare.kt: getexp's sent-out bits set, FULL also its division skipped).
         // Three values: a pick-list.
-        SettingRow(
+        if (com.pokedaisy.app.PureAdventure.on) null else SettingRow(
             tk("EXP SHARE"), if (s.expShareSupported) s.expShare.label else tk("N/A"),
             enabled = s.expShareSupported, labelBadge = NewFeatures.badge(NewFeatures.EXP_SHARE),
             subtitle = "The whole party gains EXP from a win",
@@ -686,7 +686,7 @@ private fun homeRows(
         },
         // No Pokémon past the next boss's top level (LevelCap.kt: getexp's two level-100 checks patched to the cap); the
         // value shows the cap now. Two values: a tap flips it.
-        SettingRow(
+        if (com.pokedaisy.app.PureAdventure.on) null else SettingRow(
             tk("LEVEL CAP"),
             when {
                 !s.levelCapSupported -> tk("N/A")
@@ -699,7 +699,7 @@ private fun homeRows(
             if (s.levelCapSupported) { s.setLevelCap(!s.levelCap); changed() }
         },
         // A Pokémon that evolves by trading evolves from its summary, through the game's own evolution (TradeEvolution.kt).
-        SettingRow(
+        if (com.pokedaisy.app.PureAdventure.on) null else SettingRow(
             tk("TRADE EVOS"), if (s.tradeEvolutionsSupported) onOff(s.tradeEvolutions) else tk("N/A"),
             enabled = s.tradeEvolutionsSupported, labelBadge = NewFeatures.badge(NewFeatures.TRADE_EVOLUTIONS),
             subtitle = "Evolve without a trade",
@@ -707,7 +707,7 @@ private fun homeRows(
             if (s.tradeEvolutionsSupported) { s.setTradeEvolutions(!s.tradeEvolutions); changed() }
         },
         // A new wild foe made shiny at these odds before its battle draws it (ShinyOdds.kt; the versions it knows by hash).
-        SettingRow(
+        if (com.pokedaisy.app.PureAdventure.on) null else SettingRow(
             tk("SHINY ODDS"), if (s.shinyOddsSupported) shinyOddsLabel(s.shinyOdds) else tk("N/A"),
             enabled = s.shinyOddsSupported, labelBadge = NewFeatures.badge(NewFeatures.SHINY_ODDS),
         ) {
@@ -723,13 +723,13 @@ private fun homeRows(
         },
         // The game's beep with HP in the red, and poison's damage while walking: ON = the game's own, OFF = patched out
         // (QuietPatches.kt). Two values: a tap flips them.
-        SettingRow(
+        if (com.pokedaisy.app.PureAdventure.on) null else SettingRow(
             tk("LOW HP BEEP"), if (s.lowHpBeepSupported) onOff(s.lowHpBeep) else tk("N/A"),
             enabled = s.lowHpBeepSupported, labelBadge = NewFeatures.badge(NewFeatures.LOW_HP_BEEP),
         ) {
             if (s.lowHpBeepSupported) { s.setLowHpBeep(!s.lowHpBeep); changed() }
         },
-        SettingRow(
+        if (com.pokedaisy.app.PureAdventure.on) null else SettingRow(
             tk("FIELD POISON"), if (s.fieldPoisonSupported) onOff(s.fieldPoison) else tk("N/A"),
             enabled = s.fieldPoisonSupported, labelBadge = NewFeatures.badge(NewFeatures.FIELD_POISON),
             subtitle = "Poison hurts while you walk",
@@ -744,7 +744,7 @@ private fun homeRows(
             s.setBattleRetry(!s.battleRetry); changed()
         } else null,
         // A shiny wild foe said out loud, FF and turbo stopped (ShinyHunt.kt); the subtitle counts the hunt's wild battles.
-        SettingRow(
+        if (com.pokedaisy.app.PureAdventure.on) null else SettingRow(
             tk("SHINY ALERT"), if (s.shinyAlertSupported) onOff(s.shinyAlert) else tk("N/A"),
             enabled = s.shinyAlertSupported, labelBadge = NewFeatures.badge(NewFeatures.SHINY_ALERT),
             subtitle = if (s.shinyAlertSupported && s.shinyAlert) tr("{0} wild battles since the last shiny", s.shinyHuntCount)
@@ -964,7 +964,7 @@ private fun homeRows(
         },
         SettingRow(tk("ONE-TAP MOVES"), onOff(s.oneTapMoves), subtitle = "Your moves right on the battle menu") { s.setOneTapMoves(!s.oneTapMoves); changed() },
         // A ball button on the battle menu: the last ball thrown, in one tap, without the bag (BattleBall.kt).
-        SettingRow(
+        if (com.pokedaisy.app.PureAdventure.on) null else SettingRow(
             tk("LAST BALL"), onOff(s.lastBallButton), subtitle = "Throw your last ball in one tap",
             labelBadge = NewFeatures.badge(NewFeatures.LAST_BALL),
         ) { s.setLastBallButton(!s.lastBallButton); changed() },

@@ -264,7 +264,7 @@ fun MonDetailScreen(
                 if (learns) TextNavButton(if (showLearn) tr("MOVES") else tr("LEARN"), SuggestGold, SuggestGoldDark, size) { showLearn = !showLearn; learnPick = 0 }
                 if (evolve) TextNavButton(tr("EVOLVE"), EvolveBlue, EvolveBlueDark, size) { evolveResult = null; evolveAsk = true }
                 if (reorders != null) TextNavButton(tr("SWITCH"), RunBlue, RunBlueDark, size) { switching = true }
-                if (centers) TextNavButton(tr("CENTER"), CenterPink, CenterPinkDark, size) { centerMenu = true }
+                if (centers && !com.pokedaisy.app.PureAdventure.on) TextNavButton(tr("CENTER"), CenterPink, CenterPinkDark, size) { centerMenu = true }
                 if (onDeposit != null) TextNavButton(tr("DEPOSIT"), PcGreen, PcGreenDark, size, onClick = onDeposit)
                 if (onWithdraw != null) TextNavButton(tr("WITHDRAW"), PcGreen, PcGreenDark, size, onClick = onWithdraw)
             }

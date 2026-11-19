@@ -161,7 +161,7 @@ class Prefs(context: Context) {
 
     /** TRADE EVOLUTIONS: a Pokémon that evolves by trading can evolve from its summary (TradeEvolution.kt). */
     var tradeEvolutions: Boolean
-        get() = p.getBoolean("trade_evolutions", false)
+        get() = !PureAdventure.on && p.getBoolean("trade_evolutions", false)
         set(v) = p.edit().putBoolean("trade_evolutions", v).apply()
 
     /** FLY STYLE: the companion's FLY the game's way (CLASSIC) or flown over the field (SCENIC, the default: a game without
@@ -198,12 +198,12 @@ class Prefs(context: Context) {
 
     /** REUSABLE TMS: a TM stays in the bag after it teaches a move, as an HM does (ReusableTms.kt). */
     var reusableTms: Boolean
-        get() = p.getBoolean("reusable_tms", false)
+        get() = !PureAdventure.on && p.getBoolean("reusable_tms", false)
         set(v) = p.edit().putBoolean("reusable_tms", v).apply()
 
     /** EXP SHARE: OFF / SPLIT / FULL, by [com.pokedaisy.app.companion.data.ExpShare.Mode.id]. */
     var expShare: Int
-        get() = p.getInt("exp_share", 0)
+        get() = if (PureAdventure.on) 0 else p.getInt("exp_share", 0)
         set(v) = p.edit().putInt("exp_share", v).apply()
 
     /** GAME LOOK (DISPLAY OPTIONS on both screens, CompanionSkins.enabled): the companion and the HUD in the running game's
@@ -222,37 +222,37 @@ class Prefs(context: Context) {
 
     /** LOW HP BEEP / FIELD POISON: the game's own (ON) or turned off by a patch (QuietPatches.kt). */
     var lowHpBeep: Boolean
-        get() = p.getBoolean("low_hp_beep", true)
+        get() = PureAdventure.on || p.getBoolean("low_hp_beep", true)
         set(v) = p.edit().putBoolean("low_hp_beep", v).apply()
     var fieldPoison: Boolean
-        get() = p.getBoolean("field_poison", true)
+        get() = PureAdventure.on || p.getBoolean("field_poison", true)
         set(v) = p.edit().putBoolean("field_poison", v).apply()
 
     /** AUTO REFILL: another REPEL of the kind working goes on before it runs out (RepelRefill.kt). */
     var repelRefill: Boolean
-        get() = p.getBoolean("repel_refill", false)
+        get() = !PureAdventure.on && p.getBoolean("repel_refill", false)
         set(v) = p.edit().putBoolean("repel_refill", v).apply()
 
     /** LEVEL CAP: no Pokémon goes past the next boss's top level (LevelCap.kt). */
     var levelCap: Boolean
-        get() = p.getBoolean("level_cap", false)
+        get() = !PureAdventure.on && p.getBoolean("level_cap", false)
         set(v) = p.edit().putBoolean("level_cap", v).apply()
 
     /** NO HMS NEEDED: the field moves work without a Pokémon that knows them, once the badge is in (HmFree.kt). */
     var hmFree: Boolean
-        get() = p.getBoolean("hm_free", false)
+        get() = !PureAdventure.on && p.getBoolean("hm_free", false)
         set(v) = p.edit().putBoolean("hm_free", v).apply()
 
     /** INSTANT TEXT: a text box's words appear at once (InstantText.kt). */
     var instantText: Boolean
-        get() = p.getBoolean("instant_text", false)
+        get() = !PureAdventure.on && p.getBoolean("instant_text", false)
         set(v) = p.edit().putBoolean("instant_text", v).apply()
 
     /** SHINY ODDS: a wild foe is shiny 1 in this many ([com.pokedaisy.app.companion.data.ShinyOdds]; NORMAL 8192 = the
      * game's own odds). Read through [com.pokedaisy.app.companion.data.ShinyOdds.choices]: a debug build's 1 in 4 / 1 in 1
      * count as NORMAL in a release build (PokeDaisyActivity.shinyOddsPref). */
     var shinyOdds: Int
-        get() = p.getInt("shiny_odds", com.pokedaisy.app.companion.data.ShinyOdds.NORMAL)
+        get() = if (PureAdventure.on) com.pokedaisy.app.companion.data.ShinyOdds.NORMAL else p.getInt("shiny_odds", com.pokedaisy.app.companion.data.ShinyOdds.NORMAL)
         set(v) = p.edit().putInt("shiny_odds", v).apply()
 
     /** PLAYER LOOK per ROM (keyed by CRC32): the hero the player wears ([com.pokedaisy.app.companion.data.LookChar]'s
@@ -287,14 +287,14 @@ class Prefs(context: Context) {
 
     /** SHINY ALERT: on, and its hunt's count of wild battles per ROM (since the last shiny, or since it was turned on). */
     var shinyAlert: Boolean
-        get() = p.getBoolean("shiny_alert", false)
+        get() = !PureAdventure.on && p.getBoolean("shiny_alert", false)
         set(v) = p.edit().putBoolean("shiny_alert", v).apply()
     fun shinyHuntFor(romKey: String): Int = p.getInt("shiny_hunt_$romKey", 0)
     fun setShinyHuntFor(romKey: String, count: Int) = p.edit().putInt("shiny_hunt_$romKey", count).apply()
 
     /** LAST BALL: the BATTLE tab's ball button (BattleBall.kt), and the ball last thrown per ROM (0 = none yet). */
     var lastBallButton: Boolean
-        get() = p.getBoolean("last_ball_button", true)
+        get() = !PureAdventure.on && p.getBoolean("last_ball_button", true)
         set(v) = p.edit().putBoolean("last_ball_button", v).apply()
     fun lastBallFor(romKey: String): Int? = p.getInt("last_ball_$romKey", 0).takeIf { it != 0 }
     fun setLastBallFor(romKey: String, itemId: Int) = p.edit().putInt("last_ball_$romKey", itemId).apply()
