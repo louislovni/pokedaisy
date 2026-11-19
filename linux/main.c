@@ -423,7 +423,8 @@ static struct {
   int hotkey[HK_ACTIONS]; // the HOTKEYS page's button per action, -1 none
   int dsHotkey[HK_ACTIONS];
   int modifier;
-} hostSet = {0, false, false, false, {R2, L2, -1, -1}, {R2, L2, -1, -1}, SELECT};
+  bool capsuleFrame; // CAPSULE FRAME (Capsule's build): the game in a bezel over a gradient of its colours, not black bars
+} hostSet = {0, false, false, false, {R2, L2, -1, -1}, {R2, L2, -1, -1}, SELECT, true};
 static char hostIni[PATH_MAX];
 /* A DS game's L2 / R2 are its companion and screen buttons: with no modifier held for them, its FAST FORWARD and REWIND
  * go back to the stick clicks (R3 / L3), and come back to R2 / L2 when a modifier is picked again. */
@@ -458,6 +459,8 @@ static void host_load(void) {
       hostSet.rewind = v != 0 && !pure;
     if (sscanf(line, "lcd=%d", &v) == 1)
       hostSet.lcd = v != 0;
+    if (sscanf(line, "capsule_frame=%d", &v) == 1)
+      hostSet.capsuleFrame = v != 0;
     if (sscanf(line, "swap_ab=%d", &v) == 1)
       hostSet.swapAB = v != 0;
     char modifier[16];
@@ -491,7 +494,8 @@ static void host_save(void) {
   FILE *f = fopen(hostIni, "w");
   if (!f)
     return;
-  fprintf(f, "ff_speed=%d\nrewind=%d\nlcd=%d\nswap_ab=%d\n", hostSet.ffSpeed, hostSet.rewind, hostSet.lcd, hostSet.swapAB);
+  fprintf(f, "ff_speed=%d\nrewind=%d\nlcd=%d\nswap_ab=%d\ncapsule_frame=%d\n", hostSet.ffSpeed, hostSet.rewind, hostSet.lcd,
+          hostSet.swapAB, hostSet.capsuleFrame);
   fprintf(f, "hk_modifier=%s\n", key_name(hostSet.modifier));
   for (int i = 0; i < HK_ACTIONS; i++) {
     fprintf(f, "hk_%s=%s\n", hotkeyIds[i], key_name(hostSet.hotkey[i]));
@@ -871,9 +875,19 @@ static bool environment(unsigned cmd, void *data) {
 }
 
 /* ---- video ---- */
+#ifdef POCKET_PURE
+#include "capsule_frame.h"
+#define CAPSULE_FRAME_ON hostSet.capsuleFrame
+#else
+#define CAPSULE_FRAME_ON false
+#endif
 static void video_refresh(const void *data, unsigned w, unsigned h, size_t pitch) {
   if (!data || !frameTexture) // a dupe: the last frame stays
     return;
+#ifdef POCKET_PURE
+  if (CAPSULE_FRAME_ON)
+    capsule_frame_sample(data, w, h, pitch, pixelFormat);
+#endif
   SDL_Rect r = {0, 0, (int)w, (int)h};
   SDL_UpdateTexture(frameTexture, &r, data, (int)pitch);
   frameW = (int)w;
@@ -991,6 +1005,10 @@ static void present_game(const struct pd_menu *menu) {
   SDL_GetRendererOutputSize(renderer, &ow, &oh);
   SDL_RenderClear(renderer);
   frameRect = frame_place(ow, oh);
+#ifdef POCKET_PURE
+  if (CAPSULE_FRAME_ON && frameW > 0)
+    capsule_frame_draw(renderer, frameRect, ow, oh);
+#endif
   if (frameTexture && frameW > 0) {
     SDL_Rect src = {0, 0, frameW, frameH};
     SDL_RenderCopy(renderer, frameTexture, &src, &frameRect);
@@ -1433,7 +1451,7 @@ extern int pd_ds_run(const char *, const char *, int, const char *, SDL_Renderer
 static bool ds_running(void) { return running != 0; }
 #endif
 // The host menu's rows, top to bottom (fast-forward is the FAST FORWARD hotkey's, held).
-enum { M_RESUME, M_SAVE, M_LOAD, M_HOTKEYS, M_REWIND, M_FFSPEED, M_LCD, M_SWAP, M_QUIT, M_COUNT };
+enum { M_RESUME, M_SAVE, M_LOAD, M_HOTKEYS, M_REWIND, M_FFSPEED, M_LCD, M_FRAME, M_SWAP, M_QUIT, M_COUNT };
 static void run_game(const char *path, int maxFrames, const char *shot, bool fromList) {
 #ifdef POCKET_DSPERATE
   const char *ext = strrchr(path, '.');
@@ -1589,6 +1607,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
       snprintf(rows[M_FFSPEED], 40, "FF SPEED  MAX");
     snprintf(rows[M_REWIND], 40, "REWIND  %s", hostSet.rewind ? "ON" : "OFF");
     snprintf(rows[M_LCD], 40, "LCD FILTER  %s", hostSet.lcd ? "ON" : "OFF");
+    snprintf(rows[M_FRAME], 40, "CAPSULE FRAME  %s", hostSet.capsuleFrame ? "ON" : "OFF");
     snprintf(rows[M_SWAP], 40, "A/B BUTTONS  %s", hostSet.swapAB ? "SWAPPED" : "NORMAL");
     snprintf(rows[M_HOTKEYS], 40, "HOTKEYS");
     snprintf(rows[M_QUIT], 40, fromList ? "QUIT TO GAME LIST" : "QUIT");
@@ -1596,6 +1615,8 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     int menuMap[M_COUNT], menuRows = 0;
     for (int i = 0; i < M_COUNT; i++) {
       if (pure && (i == M_SAVE || i == M_LOAD || i == M_REWIND))
+        continue;
+      if (!pure && i == M_FRAME) // Capsule's build only
         continue;
       rowPtrs[menuRows] = rows[i];
       menuMap[menuRows++] = i;
@@ -1770,6 +1791,10 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
           break;
         case M_LCD:
           hostSet.lcd = !hostSet.lcd;
+          host_save();
+          break;
+        case M_FRAME:
+          hostSet.capsuleFrame = !hostSet.capsuleFrame;
           host_save();
           break;
         case M_SWAP:
@@ -2057,6 +2082,9 @@ int main(int argc, char **argv) {
     SDL_DestroyTexture(overlayTexture);
   if (lcdTexture)
     SDL_DestroyTexture(lcdTexture);
+#ifdef POCKET_PURE
+  capsule_frame_free();
+#endif
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
   SDL_Quit();
