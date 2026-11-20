@@ -335,6 +335,9 @@ class EmulatorEngine(
      * Only fired for a start that was given one. */
     var onResumeResult: ((Boolean) -> Unit)? = null
 
+    /** Capsule's build: the game wrote its save (a new save point), on the save points' thread: the cloud push. */
+    var onSavePoint: ((File) -> Unit)? = null
+
     /** Bottom-screen touch battle control (see PLAN.md Phase 5):
      * drives the real battle menu via synthetic button presses through the
      * same touch-overlay bitmask the on-screen D-pad uses. */
@@ -1172,7 +1175,7 @@ class EmulatorEngine(
             while (running) {
                 if (PureAdventure.on && System.nanoTime() - savePointCheck > 10_000_000_000L) {
                     savePointCheck = System.nanoTime()
-                    savePoints.execute { SaveBackups.snapshot(save) }
+                    savePoints.execute { if (SaveBackups.snapshot(save) != null) onSavePoint?.invoke(save) }
                 }
                 if (!run.beforeFrame()) continue
                 run.runCore()

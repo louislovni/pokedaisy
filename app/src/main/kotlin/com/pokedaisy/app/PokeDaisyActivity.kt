@@ -3145,6 +3145,9 @@ class PokeDaisyActivity : Activity() {
 
         engine = EmulatorEngine(input, states!!, ffMusicCache).apply {
             hudEngine.value = this
+            // Capsule's build: a save made in the game goes up to the cloud a few seconds later.
+            val playing = this@PokeDaisyActivity.rom
+            onSavePoint = { if (playing != null) com.pokedaisy.app.capsule.CapsuleCloud.push(applicationContext, Prefs(applicationContext), playing) }
             lateFramesSource = { view.lateFrames }
             // The game screen's fastest mode, which no tick that waits for the refresh can outrun (VsyncCheck, GitHub #350).
             displayMaxHz = { view.display?.supportedModes?.maxOfOrNull { it.refreshRate } ?: 0f }

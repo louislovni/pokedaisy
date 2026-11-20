@@ -356,6 +356,16 @@ object CapsuleCloud {
     private val lock = Any()
 
     /** Syncs every library game's save with the account. Blocking; null when not signed in or already syncing. */
+    /** While [rom] plays: its save, just written in the game, goes up if it changed here alone (nothing comes down
+     * over a save in use, no conflict is settled: the sync back in the library does that). Off the UI thread;
+     * failures (offline) wait for the next. */
+    fun push(context: Context, prefs: Prefs, rom: File) {
+        if (!enabled) return
+        val uid = store(context).getString("uid", null) ?: return
+        if (refreshToken(context) == null) return
+        synchronized(lock) { runCatching { syncLocked(context, prefs, uid, RomArchive.saveNames(rom).first() + ".sav") } }
+    }
+
     fun sync(context: Context, prefs: Prefs): Report? {
         val uid = store(context).getString("uid", null) ?: return null
         if (refreshToken(context) == null) return null
@@ -369,7 +379,7 @@ object CapsuleCloud {
         }
     }
 
-    private fun syncLocked(context: Context, prefs: Prefs, uid: String): Report {
+    private fun syncLocked(context: Context, prefs: Prefs, uid: String, pushOnly: String? = null): Report {
         return run {
             val received = mutableListOf<String>()
             val sent = mutableListOf<String>()
@@ -389,6 +399,7 @@ object CapsuleCloud {
                 val roms = library.associateBy { RomArchive.saveNames(it).first() + ".sav" }
                 val keysTaken = HashSet<String>()
                 for ((fileName, file) in games) {
+                    if (pushOnly != null && fileName != pushOnly) continue
                     // Saves go by their game ([romKey]); one uploaded by its file name (older versions) is the game's
                     // too, the newer of the two if both are there; the old copy goes once this one is synced.
                     val key = roms[fileName]?.let { romKey(context, it) }?.takeIf { keysTaken.add(it) }
@@ -417,8 +428,10 @@ object CapsuleCloud {
                         if (localChanged && syncedCore != null) localChanged = localCore != syncedCore
                         var cloudChanged = cloudHash != null && cloudHash != synced
                         if (cloudChanged && syncedCore != null && cloudCore != null) cloudChanged = cloudCore != syncedCore
+                        val goesUp = local != null && (cloudHash == null || (localChanged && !cloudChanged))
                         when {
                             same -> {}
+                            pushOnly != null && !goesUp -> {}
                             local != null && (cloudHash == null || (localChanged && !cloudChanged)) -> {
                                 s.upload(name, local, localHash!!, file.lastModified(), fileName)
                                 manifest.put(name, localHash).put("core:$name", localCore)
@@ -450,7 +463,7 @@ object CapsuleCloud {
                         }
                         // The old name-keyed copy, now under the game's key: the save as it stands goes up under the
                         // key (when the old copy was the cloud's only one), then the old copy goes.
-                        if (old != null) {
+                        if (old != null && pushOnly == null) {
                             if (d === old) {
                                 val current = file.readBytes()
                                 val sum = hash(current)
@@ -465,7 +478,7 @@ object CapsuleCloud {
                         if (error == null) error = "${fileName.removeSuffix(".sav")} : ${e.message}"
                     }
                 }
-                store(context).edit().putLong("lastSync", System.currentTimeMillis()).apply()
+                if (pushOnly == null) store(context).edit().putLong("lastSync", System.currentTimeMillis()).apply()
             } catch (e: Exception) {
                 error = e.message ?: e.toString()
             }
