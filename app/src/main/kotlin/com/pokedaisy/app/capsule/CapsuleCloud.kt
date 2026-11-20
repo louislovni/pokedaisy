@@ -7,6 +7,7 @@ import android.util.Base64
 import com.pokedaisy.app.BuildConfig
 import com.pokedaisy.app.Prefs
 import com.pokedaisy.app.RomArchive
+import com.pokedaisy.app.RomCrcs
 import com.pokedaisy.app.RomFolder
 import com.pokedaisy.app.SaveStates
 import com.pokedaisy.app.SavesLocation
@@ -285,7 +286,7 @@ object CapsuleCloud {
         SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
 
     /** [modified]: when the save was written here (conflicts go by it, not by when it was uploaded). */
-    private fun Store.upload(name: String, data: ByteArray, sum: String, modified: Long) {
+    private fun Store.upload(name: String, data: ByteArray, sum: String, modified: Long, file: String = "") {
         val id = fileId(name)
         val text = Base64.encodeToString(data, Base64.NO_WRAP)
         val pieces = text.chunked(CHUNK).ifEmpty { listOf("") }
@@ -294,6 +295,7 @@ object CapsuleCloud {
         val old = get("files/$id")
         set("files/$id", JSONObject()
             .put("name", sv(name))
+            .put("file", sv(file))
             .put("hash", sv(sum))
             .put("core", sv(coreHash(data)))
             .put("modifiedAt", JSONObject().put("timestampValue", stamp(modified)))
@@ -306,6 +308,23 @@ object CapsuleCloud {
         if (old != null && !oldVersion.isNullOrEmpty() && oldVersion != version) {
             for (i in 0 until old.int("chunks")) runCatching { delete("chunks/${id}_${oldVersion}_$i") }
         }
+    }
+
+    /** A cloud file and its pieces (an old name-keyed copy, once moved to its game's key). */
+    private fun Store.remove(d: Doc) {
+        val version = d.str("version")
+        if (!version.isNullOrEmpty()) for (i in 0 until d.int("chunks")) runCatching { delete("chunks/${d.id}_${version}_$i") }
+        delete("files/${d.id}")
+    }
+
+    /** A game's cloud name: "rom:" + its ROM's CRC32 (an archive's: the ROM inside), the same on every device that
+     * has that ROM whatever its file is called (Capsule's iPhone CloudSync.swift and PC cloud.go do the same). */
+    private fun romKey(context: Context, rom: File): String? {
+        val crc = RomCrcs.cached(context, rom) ?: run {
+            RomCrcs.prepare(context, rom)
+            RomCrcs.cached(context, rom)
+        } ?: return null
+        return "rom:%08X".format(crc)
     }
 
     private fun Store.download(d: Doc): ByteArray {
@@ -368,20 +387,30 @@ object CapsuleCloud {
                     { SavesLocation.saveFor(context, prefs, it) },
                 )
                 val roms = library.associateBy { RomArchive.saveNames(it).first() + ".sav" }
-                for ((name, file) in games) {
+                val keysTaken = HashSet<String>()
+                for ((fileName, file) in games) {
+                    // Saves go by their game ([romKey]); one uploaded by its file name (older versions) is the game's
+                    // too, the newer of the two if both are there; the old copy goes once this one is synced.
+                    val key = roms[fileName]?.let { romKey(context, it) }?.takeIf { keysTaken.add(it) }
+                    val name = key ?: fileName
+                    val old = if (key != null) cloud[fileName] else null
+                    if (key != null && manifest.optString(key).isEmpty() && manifest.optString(fileName).isNotEmpty()) {
+                        manifest.put(key, manifest.optString(fileName)).put("core:$key", manifest.optString("core:$fileName").ifEmpty { null })
+                    }
                     try {
                         val local = file.takeIf { it.isFile && it.length() in 1 until 4_000_000 }?.readBytes()
-                        val d = cloud[name]
+                        val keyed = cloud[name]
+                        val d = if (old != null && (keyed == null || old.time("updatedAt") > keyed.time("updatedAt"))) old else keyed
                         val localHash = local?.let(::hash)
                         val cloudHash = d?.str("hash")
                         val synced = manifest.optString(name).ifEmpty { null }
                         val syncedCore = manifest.optString("core:$name").ifEmpty { null }
                         val localCore = local?.let(::coreHash)
                         val cloudCore = d?.str("core")
-                        if (localHash == cloudHash || (localCore != null && localCore == cloudCore)) {
+                        val same = localHash == cloudHash || (localCore != null && localCore == cloudCore)
+                        if (same && localHash != null) {
                             // The same save (maybe with another clock footer): nothing to send.
-                            if (localHash != null) manifest.put(name, localHash).put("core:$name", localCore)
-                            continue
+                            manifest.put(name, localHash).put("core:$name", localCore)
                         }
                         // Changed since the last sync: by the save's core when the last sync noted it, else by the whole file.
                         var localChanged = localHash != null && localHash != synced
@@ -389,17 +418,18 @@ object CapsuleCloud {
                         var cloudChanged = cloudHash != null && cloudHash != synced
                         if (cloudChanged && syncedCore != null && cloudCore != null) cloudChanged = cloudCore != syncedCore
                         when {
+                            same -> {}
                             local != null && (cloudHash == null || (localChanged && !cloudChanged)) -> {
-                                s.upload(name, local, localHash!!, file.lastModified())
+                                s.upload(name, local, localHash!!, file.lastModified(), fileName)
                                 manifest.put(name, localHash).put("core:$name", localCore)
-                                sent += name.removeSuffix(".sav")
+                                sent += fileName.removeSuffix(".sav")
                             }
                             d != null && (local == null || (cloudChanged && !localChanged)) -> {
                                 val theirs = s.download(d)
                                 write(context, file, theirs, keepOld = local != null)
-                                freshBoot(context, roms[name])
+                                freshBoot(context, roms[fileName])
                                 manifest.put(name, cloudHash).put("core:$name", coreHash(theirs))
-                                received += name.removeSuffix(".sav")
+                                received += fileName.removeSuffix(".sav")
                             }
                             local != null && d != null -> {
                                 // Changed on both sides: the save made last goes on (when each was written, not
@@ -407,21 +437,32 @@ object CapsuleCloud {
                                 val theirs = s.download(d)
                                 val cloudDate = d.time("modifiedAt").takeIf { it > 0 } ?: d.time("updatedAt")
                                 if (file.lastModified() >= cloudDate) {
-                                    backup(context, name, "cloud", theirs)
-                                    s.upload(name, local, localHash!!, file.lastModified())
+                                    backup(context, fileName, "cloud", theirs)
+                                    s.upload(name, local, localHash!!, file.lastModified(), fileName)
                                     manifest.put(name, localHash).put("core:$name", localCore)
                                 } else {
                                     write(context, file, theirs, keepOld = true)
-                                    freshBoot(context, roms[name])
+                                    freshBoot(context, roms[fileName])
                                     manifest.put(name, cloudHash).put("core:$name", coreHash(theirs))
                                 }
-                                conflicts += name.removeSuffix(".sav")
+                                conflicts += fileName.removeSuffix(".sav")
                             }
+                        }
+                        // The old name-keyed copy, now under the game's key: the save as it stands goes up under the
+                        // key (when the old copy was the cloud's only one), then the old copy goes.
+                        if (old != null) {
+                            if (d === old) {
+                                val current = file.readBytes()
+                                val sum = hash(current)
+                                s.upload(name, current, sum, file.lastModified(), fileName)
+                                manifest.put(name, sum).put("core:$name", coreHash(current))
+                            }
+                            s.remove(old)
                         }
                     } catch (e: ApiError) {
                         throw e
                     } catch (e: Exception) {
-                        if (error == null) error = "${name.removeSuffix(".sav")} : ${e.message}"
+                        if (error == null) error = "${fileName.removeSuffix(".sav")} : ${e.message}"
                     }
                 }
                 store(context).edit().putLong("lastSync", System.currentTimeMillis()).apply()
