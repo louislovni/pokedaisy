@@ -414,18 +414,33 @@ object CapsuleCloud {
         if (!enabled) return
         val uid = store(context).getString("uid", null) ?: return
         if (refreshToken(context) == null) return
-        synchronized(lock) { runCatching { syncLocked(context, prefs, uid, RomArchive.saveNames(rom).first() + ".sav") } }
+        synchronized(lock) {
+            status.value = status.value.copy(syncing = true, pushing = true)
+            val report = runCatching { syncLocked(context, prefs, uid, RomArchive.saveNames(rom).first() + ".sav") }.getOrNull()
+            val failed = report == null || report.error != null
+            status.value = Status(last = if (failed) status.value.last else System.currentTimeMillis(), failed = failed)
+        }
     }
+
+    /** The library's cloud line ([Status]): Compose state, set from the sync threads. */
+    data class Status(val syncing: Boolean = false, val pushing: Boolean = false, val last: Long = 0L, val failed: Boolean = false)
+
+    val status = androidx.compose.runtime.mutableStateOf(Status())
 
     fun sync(context: Context, prefs: Prefs): Report? {
         val uid = store(context).getString("uid", null) ?: return null
         if (refreshToken(context) == null) return null
         synchronized(lock) {
             busy = true
+            status.value = status.value.copy(syncing = true, pushing = false, last = maxOf(status.value.last, lastSync(context)))
+            var report: Report? = null
             try {
-                return syncLocked(context, prefs, uid)
+                report = syncLocked(context, prefs, uid)
+                return report
             } finally {
                 busy = false
+                val failed = report == null || report.error != null
+                status.value = Status(last = lastSync(context), failed = failed)
             }
         }
     }

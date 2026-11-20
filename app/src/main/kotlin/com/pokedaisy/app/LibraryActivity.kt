@@ -606,6 +606,7 @@ class LibraryActivity : ComponentActivity() {
                     }
                     // SETTINGS is the rail's / bar's.
                 }
+                CapsuleCloudLine(small)
                 Spacer(Modifier.height(m.u * (if (library.isNotEmpty() || toolsOpen) 8 else 4)))
                 SearchStrip(m)
 
@@ -983,6 +984,44 @@ class LibraryActivity : ComponentActivity() {
                     onClose = { ssIntro = false },
                 )
             }
+        }
+    }
+
+    /** Capsule's build, signed in: the cloud's state under the title (syncing, sending a save, the last sync's time,
+     *  or a failure until one goes through); a tap opens Settings, where SYNC NOW and the account are. */
+    @Composable
+    private fun CapsuleCloudLine(m: GbaTextMetrics) {
+        val cloud = com.pokedaisy.app.capsule.CapsuleCloud
+        if (!cloud.enabled || cloud.email(this) == null) return
+        val st = cloud.status.value
+        var now by remember { mutableStateOf(System.currentTimeMillis()) }
+        LaunchedEffect(st) {
+            while (true) {
+                now = System.currentTimeMillis()
+                kotlinx.coroutines.delay(30_000)
+            }
+        }
+        val last = maxOf(st.last, cloud.lastSync(this))
+        val minutes = ((now - last) / 60_000).toInt()
+        val text = when {
+            st.syncing && st.pushing -> "CLOUD : ENVOI DE TA SAUVEGARDE..."
+            st.syncing -> "CLOUD : SYNCHRONISATION..."
+            st.failed -> "CLOUD : SYNCHRO IMPOSSIBLE (HORS LIGNE ?)"
+            last == 0L -> "CLOUD : PAS ENCORE SYNCHRONISÉ"
+            minutes < 1 -> "CLOUD : SYNCHRONISÉ À L'INSTANT"
+            minutes < 60 -> "CLOUD : SYNCHRONISÉ IL Y A $minutes MIN"
+            minutes < 1440 -> "CLOUD : SYNCHRONISÉ IL Y A ${minutes / 60} H"
+            else -> "CLOUD : SYNCHRONISÉ IL Y A ${minutes / 1440} J"
+        }
+        OptionListWindow(
+            m,
+            Modifier.fillMaxWidth().padding(start = SCREEN_MARGIN, end = SCREEN_MARGIN, top = m.u * 4)
+                .clickable { startActivity(Intent(this@LibraryActivity, SettingsActivity::class.java)) },
+        ) {
+            GbaText(
+                text, if (st.failed && !st.syncing) OptionColors.value else OptionColors.label, OptionColors.labelShadow, m,
+                modifier = Modifier.padding(horizontal = m.u * 4, vertical = m.u * 2),
+            )
         }
     }
 
