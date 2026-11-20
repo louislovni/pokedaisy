@@ -1615,9 +1615,12 @@ class LibraryActivity : ComponentActivity() {
         }
         // A ROM whose CRC isn't known (or an archive) is read / unpacked first, off the UI thread: the game's window did
         // it on its own and froze on a 512 MB DS cart.
-        if (RomCrcs.needsPrepare(this, rom)) {
+        // Capsule's build: a sync still writing saves (on the way back here) ends first, so the game starts on what it brought.
+        val syncing = com.pokedaisy.app.capsule.CapsuleCloud.busy
+        if (RomCrcs.needsPrepare(this, rom) || syncing) {
             preparing = rom
             kotlin.concurrent.thread(name = "pokedaisy-prepare") {
+                com.pokedaisy.app.capsule.CapsuleCloud.awaitIdle()
                 RomCrcs.prepare(this, rom)
                 runOnUiThread {
                     launch(rom)
