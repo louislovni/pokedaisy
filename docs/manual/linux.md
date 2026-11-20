@@ -168,6 +168,10 @@ while you rewind.
 The program's game list shows the `.gb`, `.gbc`, `.gba` and `.nds` files in the `roms` folder of its data folder (and, on
 PortMaster, the firmware's folders above). Pick one with the D-pad and A. Unzip your games first.
 
+### Patching a ROM hack
+
+On a desktop, drop a hack's patch file (`.bps`, `.ups`, `.ips` or `.xdelta`) on the game list's window. A `.bps` or `.ups` patch says which game it's for, so the original is found in the list by itself; for an `.ips` or `.xdelta` the list asks you to pick the original game (`B` cancels). The hack is saved next to the original, named after the patch, and shows up in the list. Your original game isn't changed. Dropping a game file on the window copies it into the `roms` folder.
+
 ## Moving a save you already have
 
 The program keeps a game's save in its data folder's `saves` folder, named after the whole ROM file name plus

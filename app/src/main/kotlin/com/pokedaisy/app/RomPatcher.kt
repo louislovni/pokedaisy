@@ -139,13 +139,36 @@ object RomPatcher {
         val source = RomArchive.open(base).use { it.readBytes() }
         onProgress(0.1f)
         val target = patch.apply(source) { onProgress(0.1f + it * 0.8f) }
+        return write(target, patch.targetCrc, dir, name, onProgress)
+    }
+
+    /** The largest ROM an IPS / UPS / xdelta patch may make: a DS game's 512 MB, as RomIntake takes with DS games on. */
+    const val NATIVE_MAX_BYTES = 512L shl 20
+
+    /** An IPS / UPS / xdelta patch ([RomPatchNative]) failed: [code] is its ERR_*. */
+    class NativeError(val code: Int) : Exception("patch error $code")
+
+    /** [apply] for an IPS / UPS / xdelta patch's bytes ([RomPatchNative], which checks what the format can). Throws [NativeError]. */
+    fun applyNative(patch: ByteArray, base: File, dir: File, name: String, onProgress: (Float) -> Unit = {}): Result {
+        onProgress(0f)
+        val source = RomArchive.open(base).use { it.readBytes() }
+        onProgress(0.1f)
+        val error = IntArray(1)
+        val target = RomPatchNative.apply(source, patch, error) ?: throw NativeError(error[0])
+        if (target.size.toLong() > NATIVE_MAX_BYTES) throw NativeError(RomPatchNative.ERR_MEMORY)
+        onProgress(0.9f)
+        return write(target, BpsPatch.crc32(target, target.size), dir, name, onProgress)
+    }
+
+    /** [target] written to [dir] as [name] (or kept as it is, the same ROM there already). */
+    private fun write(target: ByteArray, targetCrc: Long, dir: File, name: String, onProgress: (Float) -> Unit): Result {
         dir.mkdirs()
         val stem = name.substringBeforeLast('.')
         val ext = name.substringAfterLast('.', "")
         var out = File(dir, name)
         var n = 2
         while (out.exists()) {
-            if (out.length() == target.size.toLong() && runCatching { crcOf(out) }.getOrNull() == patch.targetCrc) {
+            if (out.length() == target.size.toLong() && runCatching { crcOf(out) }.getOrNull() == targetCrc) {
                 onProgress(1f)
                 return Result(out, existed = true)
             }

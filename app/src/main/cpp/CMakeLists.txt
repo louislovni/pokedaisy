@@ -67,7 +67,10 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/nds/dsperate.cmake")
 # ---------------------------------------------------------------------------
 # Our JNI bridge.
 # ---------------------------------------------------------------------------
-add_library(pokedaisy SHARED pokedaisy_jni.c pokedaisy_ra.c pk_coop_lock_jni.c pk_link.c pk_link_jni.c pk_gb_field.c
+# ROM patches for PATCH A ROM (pk_patch_jni.c): IPS, UPS, BPS, xdelta.
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/pkpatch/pkpatch.cmake")
+
+add_library(pokedaisy SHARED pokedaisy_jni.c pokedaisy_ra.c pk_coop_lock_jni.c pk_link.c pk_link_jni.c pk_gb_field.c pk_patch_jni.c
     nds/pk_nds_core.cpp nds/pk_nds_dsp.cpp nds/pk_nds.cpp nds/pk_nds_platform.cpp nds/pk_nds_field.cpp nds/pk_nds_field_gpu.cpp nds/pk_nds_call.cpp nds/pk_nds_call_melonds.cpp nds/pk_nds_wide.cpp
     nds/pk_nds_music.cpp nds/pk_nds_gl.cpp)
 set_target_properties(pokedaisy PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
@@ -79,6 +82,7 @@ endif()
 # pk_api brings mGBA with its headers and the definitions they need (pk_api.cmake).
 target_link_libraries(pokedaisy
     pk_api
+    pkpatch
     rcheevos
     core
     dsperate_core

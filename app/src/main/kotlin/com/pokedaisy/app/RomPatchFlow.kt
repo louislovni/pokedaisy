@@ -29,8 +29,10 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 
 /**
- * PATCH A ROM, for the library: a picked `.bps` read ([BpsPatch]), its base ROM looked for among every ROM the app
- * knows ([RomPatcher.findBase]), then the details and APPLY PATCH; the result is written beside the player's other
+ * PATCH A ROM, for the library: a picked patch read - `.bps` by [BpsPatch], `.ups` / `.ips` / `.xdelta` by
+ * [RomPatchNative] - its base ROM looked for among every ROM the app knows ([RomPatcher.findBase]) when the patch names
+ * it (BPS, UPS: size and CRC32), else picked by the player from the library (IPS, xdelta: the game its author names;
+ * xdelta's own note of the file it was made from goes first), then the details and APPLY PATCH; the result is written beside the player's other
  * games of its kind ([RomPatcher.outputDir]) and joins the library if the companion can read it. The work runs off
  * the UI thread; [step] is what [PatchWindow] shows.
  */
@@ -42,9 +44,15 @@ class RomPatchFlow(
     /** What the patch says about itself, for the window's rows. */
     class PatchInfo(
         val fileName: String, val sourceSize: Long, val sourceCrc: Long, val targetSize: Long, val metadata: String,
+        /** BPS, UPS, IPS or xdelta. */
+        val format: String = "BPS",
+        /** xdelta: the file name the patch was made from (its app header), when it has one. */
+        val sourceName: String? = null,
     ) {
         /** The base ROM by name, when it's one of [RomPatcher.KNOWN_BASES]. */
         val knownBase: String? get() = RomPatcher.KNOWN_BASES[sourceCrc]
+        /** The patch names its base ROM (BPS, UPS): it's found, not picked. */
+        val namesBase: Boolean get() = sourceCrc >= 0
     }
 
     /** Where the patched ROM will go, worked out once the base ROM is found. */
@@ -55,6 +63,8 @@ class RomPatchFlow(
         class Looking(val info: PatchInfo?, val progress: Float) : Step()
         /** None of the player's ROMs is the one the patch is for. */
         class NotFound(val info: PatchInfo) : Step()
+        /** IPS / xdelta: the player picks the base ROM from [choices] (file, label), likeliest first. */
+        class PickBase(val info: PatchInfo, val choices: List<Pair<File, String>>) : Step()
         /** Found: the details and APPLY PATCH. */
         class Ready(val info: PatchInfo, val plan: Plan) : Step()
         class Patching(val info: PatchInfo, val plan: Plan, val progress: Float) : Step()
@@ -70,6 +80,8 @@ class RomPatchFlow(
     var step by mutableStateOf<Step?>(null)
 
     private var patch: BpsPatch? = null
+    /** An IPS / UPS / xdelta patch's bytes, applied by [RomPatchNative]. */
+    private var raw: ByteArray? = null
     /** Bumped by every start and CLOSE: a search still running for a closed window never opens it again. */
     private var run = 0
     private val prefs by lazy { Prefs(activity) }
@@ -101,17 +113,41 @@ class RomPatchFlow(
     /** [bytes] read as a patch and its base ROM looked for. Blocking. */
     private fun look(bytes: ByteArray, fileName: String, token: Int) {
         fun post(block: () -> Unit) = postFor(token, block)
-        val p = try {
-            BpsPatch.parse(bytes)
-        } catch (e: BpsPatch.Error) {
-            post { step = Step.Failed(messageFor(e.reason)) }
+        val info = if (BpsPatch.looksLikeBps(bytes)) {
+            val p = try {
+                BpsPatch.parse(bytes)
+            } catch (e: BpsPatch.Error) {
+                post { step = Step.Failed(messageFor(e.reason)) }
+                return
+            }
+            patch = p
+            PatchInfo(fileName, p.sourceSize, p.sourceCrc, p.targetSize, p.metadata)
+        } else {
+            val head = runCatching { RomPatchNative.info(bytes) }.getOrNull()
+            val format = head?.get(0)?.toInt() ?: RomPatchNative.UNKNOWN
+            if (format == RomPatchNative.UNKNOWN || format == RomPatchNative.BPS) {
+                post { step = Step.Failed(tr("This isn't a patch PATCH A ROM can read. It takes .bps, .ups, .ips and .xdelta files.")) }
+                return
+            }
+            raw = bytes
+            PatchInfo(
+                fileName, head!![1], head[2], -1L, "", RomPatchNative.formatName(format),
+                sourceName = if (format == RomPatchNative.XDELTA) xdeltaSourceName(bytes) else null,
+            )
+        }
+        if (!info.namesBase) {
+            // IPS / xdelta: the player picks; xdelta's own note of its source file, if it matches one, first.
+            val roms = RomFolder.allRomFiles(activity, prefs).distinctBy { it.absolutePath }.filter { it.isFile }
+            val hint = info.sourceName?.substringBeforeLast('.')?.lowercase()
+            val choices = roms.map { it to GameTitles.label(activity, prefs, it) }
+                .sortedWith(compareBy<Pair<File, String>> { (f, _) -> if (hint != null && f.nameWithoutExtension.lowercase() == hint) 0 else 1 }
+                    .thenBy { it.second.lowercase() })
+            post { step = if (choices.isEmpty()) Step.NotFound(info) else Step.PickBase(info, choices) }
             return
         }
-        patch = p
-        val info = PatchInfo(fileName, p.sourceSize, p.sourceCrc, p.targetSize, p.metadata)
         post { step = Step.Looking(info, 0f) }
         var last = 0
-        val base = RomPatcher.findBase(RomFolder.allRomFiles(activity, prefs), p.sourceSize, p.sourceCrc, crcs) { f ->
+        val base = RomPatcher.findBase(RomFolder.allRomFiles(activity, prefs), info.sourceSize, info.sourceCrc, crcs) { f ->
             val pct = (f * 100).toInt()
             if (pct != last) {
                 last = pct
@@ -122,20 +158,36 @@ class RomPatchFlow(
             post { step = Step.NotFound(info) }
             return
         }
+        val plan = planFor(base, fileName)
+        post { step = Step.Ready(info, plan) }
+    }
+
+    private fun planFor(base: File, fileName: String): Plan {
         val platform = RomPatcher.platformOf(base)
-        val plan = Plan(
+        return Plan(
             base = base,
             baseLabel = GameTitles.label(activity, prefs, base),
             dir = RomPatcher.outputDir(platform, base, prefs.romsFolders, importedDir),
             name = RomPatcher.outputName(fileName, RomPatcher.extensionFor(base, platform)),
         )
-        post { step = Step.Ready(info, plan) }
+    }
+
+    /** IPS / xdelta: the base ROM the player picked from [Step.PickBase]. */
+    fun pickBase(base: File) {
+        val pick = step as? Step.PickBase ?: return
+        val token = run
+        Thread({
+            val plan = planFor(base, pick.info.fileName)
+            postFor(token) { if (step is Step.PickBase) step = Step.Ready(pick.info, plan) }
+        }, "pokedaisy-patch-plan").apply { isDaemon = true; start() }
     }
 
     /** APPLY PATCH. */
     fun apply() {
         val ready = step as? Step.Ready ?: return
-        val p = patch ?: return
+        val p = patch
+        val r = raw
+        if (p == null && r == null) return
         val info = ready.info
         val plan = ready.plan
         step = Step.Patching(info, plan, 0f)
@@ -143,16 +195,24 @@ class RomPatchFlow(
         fun post(block: () -> Unit) = postFor(token, block)
         Thread({
             var last = -1
-            val result = try {
-                RomPatcher.apply(p, plan.base, plan.dir, plan.name) { f ->
-                    val pct = (f * 100).toInt()
-                    if (pct != last) {
-                        last = pct
-                        post { if (step is Step.Patching) step = Step.Patching(info, plan, f) }
-                    }
+            val progress: (Float) -> Unit = { f ->
+                val pct = (f * 100).toInt()
+                if (pct != last) {
+                    last = pct
+                    post { if (step is Step.Patching) step = Step.Patching(info, plan, f) }
                 }
+            }
+            val result = try {
+                if (p != null) RomPatcher.apply(p, plan.base, plan.dir, plan.name, progress)
+                else RomPatcher.applyNative(r!!, plan.base, plan.dir, plan.name, progress)
             } catch (e: BpsPatch.Error) {
                 post { step = Step.Failed(messageFor(e.reason)) }
+                return@Thread
+            } catch (e: RomPatcher.NativeError) {
+                post { step = Step.Failed(nativeMessage(e.code, info.format)) }
+                return@Thread
+            } catch (e: OutOfMemoryError) {
+                post { step = Step.Failed(tr("This patch is too big to apply on this device.")) }
                 return@Thread
             } catch (t: Throwable) {
                 post { step = Step.Failed(tr("The patched ROM couldn't be saved. Check there's free space and try again.")) }
@@ -181,6 +241,7 @@ class RomPatchFlow(
         if (step is Step.Patching) return
         step = null
         patch = null
+        raw = null
         run++
     }
 
@@ -194,6 +255,45 @@ class RomPatchFlow(
             BpsPatch.Reason.TOO_BIG -> tr("This patch is too big to apply on this device.")
             BpsPatch.Reason.WRONG_SOURCE, BpsPatch.Reason.BAD_RESULT ->
                 tr("The patched ROM didn't come out right, so nothing was saved. The patch may be damaged: download it again.")
+        }
+
+        /** An IPS / UPS / xdelta failure ([RomPatchNative]'s ERR_*), in words. */
+        fun nativeMessage(code: Int, format: String): String = when (code) {
+            RomPatchNative.ERR_WRONG_SOURCE, RomPatchNative.ERR_RESULT ->
+                tr("This patch isn't for that ROM (or not for that version of it). Check which game and version its author names: language, 1.0 or 1.1.")
+            RomPatchNative.ERR_UNSUPPORTED -> tr("This {0} patch uses an option PATCH A ROM can't read. Ask for a .bps or a plain .xdelta.", format)
+            RomPatchNative.ERR_MEMORY -> tr("This patch is too big to apply on this device.")
+            else -> tr("This patch file is damaged or cut short. Download it again and try once more.")
+        }
+
+        /**
+         * The file name an xdelta patch was made from, from its app header (xdelta3 writes `target//source/` and the
+         * names' encodings), or null. VCDIFF: magic, version, the header byte, then the secondary compressor's id, a
+         * code table and the app header, each only when its bit is set.
+         */
+        fun xdeltaSourceName(p: ByteArray): String? {
+            if (p.size < 5) return null
+            var at = 4
+            val hdr = p[at++].toInt() and 0xFF
+            fun vint(): Long? {
+                var v = 0L
+                for (i in 0 until 9) {
+                    if (at >= p.size) return null
+                    val b = p[at++].toInt() and 0xFF
+                    v = (v shl 7) or (b and 0x7F).toLong()
+                    if (b and 0x80 == 0) return v
+                }
+                return null
+            }
+            if (hdr and 0x01 != 0) at++
+            if (hdr and 0x02 != 0) { val n = vint() ?: return null; at += n.toInt() }
+            if (hdr and 0x04 == 0) return null
+            val n = vint()?.toInt() ?: return null
+            if (n <= 0 || n > 4096 || at + n > p.size) return null
+            val text = String(p, at, n, Charsets.UTF_8)
+            val parts = text.split('/')
+            // "target//source/": [target, encoding, source, encoding]
+            return parts.getOrNull(2)?.takeIf { it.isNotBlank() }?.substringAfterLast('\\')
         }
 
         /** "DD88761C". */
@@ -223,7 +323,7 @@ fun PatchWindow(
                 Column(Modifier.padding(horizontal = m.u * 6, vertical = m.u * 2)) {
                     // On a small screen everything above the buttons scrolls, so the buttons stay on screen.
                     Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-                        PatchBody(step, m, small)
+                        PatchBody(step, m, small, flow::pickBase)
                     }
                     Row(
                         Modifier.fillMaxWidth().padding(top = m.u * 6, bottom = m.u * 2),
@@ -256,10 +356,12 @@ fun PatchWindow(
 }
 
 @Composable
-private fun PatchBody(step: RomPatchFlow.Step, m: GbaTextMetrics, small: GbaTextMetrics) {
+private fun PatchBody(step: RomPatchFlow.Step, m: GbaTextMetrics, small: GbaTextMetrics, pickBase: (File) -> Unit) {
     fun patchRows(info: RomPatchFlow.PatchInfo) = listOfNotNull(
         tr("FILE") to info.fileName,
-        tr("MADE FOR") to (info.knownBase ?: tr("A ROM with CRC32 {0}", RomPatchFlow.crcText(info.sourceCrc))),
+        (tr("FORMAT") to info.format).takeIf { info.format != "BPS" },
+        if (info.namesBase) tr("MADE FOR") to (info.knownBase ?: tr("A ROM with CRC32 {0}", RomPatchFlow.crcText(info.sourceCrc)))
+        else info.sourceName?.let { tr("MADE FROM") to it },
         // The patch's own notes (an author, a version), when it has any.
         info.metadata.takeIf { it.isNotEmpty() }?.let { tr("NOTES") to it.take(200) },
     )
@@ -267,13 +369,17 @@ private fun PatchBody(step: RomPatchFlow.Step, m: GbaTextMetrics, small: GbaText
     fun baseRows(plan: RomPatchFlow.Plan, info: RomPatchFlow.PatchInfo) = listOf(
         tr("GAME") to plan.baseLabel,
         tr("FILE") to plan.base.absolutePath,
-        "CRC32" to tr("{0} (matches)", RomPatchFlow.crcText(info.sourceCrc)),
+        when {
+            info.namesBase -> "CRC32" to tr("{0} (matches)", RomPatchFlow.crcText(info.sourceCrc))
+            info.format == "IPS" -> tr("CHECK") to tr("IPS can't tell: be sure it's the game the author names")
+            else -> tr("CHECK") to tr("When patching")
+        },
     )
 
     fun outRows(plan: RomPatchFlow.Plan, info: RomPatchFlow.PatchInfo, file: File? = null) = listOf(
         tr("NAME") to (file?.name ?: plan.name),
         tr("SAVED TO") to (file?.parent ?: plan.dir.absolutePath),
-        tr("SIZE") to RomPatchFlow.sizeText(info.targetSize),
+        tr("SIZE") to (file?.length() ?: info.targetSize).let { if (it >= 0) RomPatchFlow.sizeText(it) else tr("Known once patched") },
     )
 
     when (step) {
@@ -284,13 +390,27 @@ private fun PatchBody(step: RomPatchFlow.Step, m: GbaTextMetrics, small: GbaText
             Spacer(Modifier.height(m.u * 3))
             SyncProgressBar(step.progress, m)
         }
+        is RomPatchFlow.Step.PickBase -> {
+            InfoSection(GameInfo.Section(tr("PATCH"), patchRows(step.info)), first = true, m, small)
+            Spacer(Modifier.height(m.u * 6))
+            Message(tr("PICK THE ORIGINAL GAME"), m, value = true)
+            Spacer(Modifier.height(m.u * 2))
+            Message(tr("A {0} patch doesn't say which ROM it's for: pick the game its author names (often the English or French version).", step.info.format), small)
+            Spacer(Modifier.height(m.u * 4))
+            Column(verticalArrangement = Arrangement.spacedBy(m.u * 3)) {
+                step.choices.forEach { (file, label) ->
+                    OptionButton(label, m, modifier = Modifier.fillMaxWidth(), onClick = { pickBase(file) })
+                }
+            }
+        }
         is RomPatchFlow.Step.NotFound -> {
             InfoSection(GameInfo.Section(tr("PATCH"), patchRows(step.info)), first = true, m, small)
             Spacer(Modifier.height(m.u * 6))
             Message(tr("BASE ROM NOT FOUND"), m, value = true)
             Spacer(Modifier.height(m.u * 2))
             Message(
-                step.info.knownBase?.let {
+                if (!step.info.namesBase) tr("No game in your library to patch. Add the original game first, then try again.")
+                else step.info.knownBase?.let {
                     tr("This patch is for {0} (CRC32 {1}), and no ROM in your library has that checksum. Add that ROM to your library or a ROMs folder, then try again.", it, RomPatchFlow.crcText(step.info.sourceCrc))
                 } ?: tr("This patch is for a {0} ROM with CRC32 {1}, and no ROM in your library has that checksum. Add that ROM to your library or a ROMs folder, then try again.", RomPatchFlow.sizeText(step.info.sourceSize), RomPatchFlow.crcText(step.info.sourceCrc)),
                 small,

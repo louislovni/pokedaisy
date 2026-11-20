@@ -35,7 +35,7 @@ Down the left edge of the library are three buttons: `GAMES`, `TOOLS` and `SETTI
 
 | Tool | What it does |
 | --- | --- |
-| `PATCH A ROM` | Turns a `.bps` patch into a game (see [Patch a ROM hack](#patch-a-rom-hack)). |
+| `PATCH A ROM` | Turns a `.bps`, `.ups`, `.ips` or `.xdelta` patch into a game (see [Patch a ROM hack](#patch-a-rom-hack)). |
 | `LINK PLAY` | Runs two to four GBA games joined as if by a link cable, to trade and battle between them (see [Link play](link-play.md)). |
 | `SAVE EDITOR` | Opens a game's save (a GBA game, Diamond / Pearl / Platinum / HeartGold / SoulSilver, or Black / White and their sequels): move Pokémon between the party and the PC, change a Pokémon's nature, IVs, EVs, level and moves, the bag, money and Pokédex, and see what the Pokédex is missing (see [Save editor and save trades](save-trade.md)). |
 | `TRADE SAVES` | Trades Pokémon between two of your games' save files, from the party or the PC, or sends one away and back to evolve it (see [Save editor and save trades](save-trade.md)). |
@@ -98,10 +98,10 @@ Games copied straight into `Android/data/com.pokedaisy.app/files/roms/` on the d
 
 ### Patch a ROM hack
 
-Most ROM hacks come as a `.bps` patch: a file that turns a game you already have into the hack. PokeDaisy can apply it for you.
+Most ROM hacks come as a patch (a `.bps`, `.ups`, `.ips` or `.xdelta` file) that turns a game you already have into the hack. PokeDaisy can apply it for you.
 
-1. Tap `+` and pick `PATCH A ROM` (it's also under `TOOLS`), then pick the `.bps` file. Picking a `.bps` with `ADD A ROM FILE`, or opening one with PokeDaisy from a file manager, does the same.
-2. PokeDaisy reads the patch and looks through your library for the game it was made for. A patch names that game by its checksum (CRC32, a fingerprint of every byte), so it finds the right file whatever it's called, zipped ones too. You don't pick it yourself.
+1. Tap `+` and pick `PATCH A ROM` (it's also under `TOOLS`), then pick the patch file. Picking a patch with `ADD A ROM FILE`, or opening one with PokeDaisy from a file manager, does the same.
+2. PokeDaisy reads the patch and looks through your library for the game it was made for. A patch names that game by its checksum (CRC32, a fingerprint of every byte), so it finds the right file whatever it's called, zipped ones too. You don't pick it yourself. That's true of `.bps` and `.ups` patches; an `.ips` or `.xdelta` patch doesn't say which game it's for, so you pick the original game from a list (for an `.xdelta`, the file it was made from comes first when you have it). An `.xdelta` still checks the game when it's applied; an `.ips` can't, so pick the game and version its author names.
 3. When it's found, you see the patch, the game it goes on and where the patched game will be saved. Tap `APPLY PATCH` and a bar shows how far along it is.
 4. When it's done, you're told where the new game is. If the companion can read it, it's in your library right away and `PLAY` starts it.
 

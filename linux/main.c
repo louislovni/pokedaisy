@@ -9,6 +9,7 @@
 #include "display_filter.h"
 #include "pd_canvas.h"
 #include "pd_menu.h"
+#include "pk_patch.h"
 #include <SDL.h>
 #include <dirent.h>
 #include <dlfcn.h>
@@ -51,6 +52,7 @@ static void stop(int sig) {
   (void)sig;
   running = 0;
 }
+static char droppedFile[4096]; // SDL_DROPFILE's path, until the game list takes it ("" = none)
 static void notice(const char *s) {
   snprintf(message, sizeof message, "%s", s);
   messageUntil = SDL_GetTicks() + 2500;
@@ -313,6 +315,10 @@ static void events(void) {
   while (SDL_PollEvent(&e)) {
     if (e.type == SDL_QUIT)
       running = 0;
+    if (e.type == SDL_DROPFILE) { // a patch (or a game) dropped on the window: the game list takes it
+      snprintf(droppedFile, sizeof droppedFile, "%s", e.drop.file);
+      SDL_free(e.drop.file);
+    }
     if (e.type == SDL_JOYDEVICEADDED && !SDL_IsGameController(e.jdevice.which))
       controller_added(e.jdevice.which);
     if (e.type == SDL_AUDIODEVICEREMOVED && !e.adevice.iscapture && audio && e.adevice.which == audio)
@@ -2012,6 +2018,53 @@ static const char *base_name(const char *p) {
   return s ? s + 1 : p;
 }
 static int cmp(const void *a, const void *b) { return strcasecmp(base_name(*(char *const *)a), base_name(*(char *const *)b)); }
+/* ---- the game list's patcher: a ROM hack's patch (.ips, .ups, .bps, .xdelta: third_party/pkpatch) dropped on the
+ * window becomes a new game beside the original. UPS / BPS name their original by CRC32, found among the list's games;
+ * IPS / xdelta don't, so the list asks for it. A dropped game is copied into DATA/roms. ---- */
+static const char *patch_error(int code) {
+  switch (code) {
+  case PK_PATCH_ERR_WRONG_SOURCE:
+  case PK_PATCH_ERR_RESULT:
+    return "This patch is for another game or version";
+  case PK_PATCH_ERR_UNSUPPORTED:
+    return "This patch uses an option that can't be read";
+  case PK_PATCH_ERR_MEMORY:
+    return "Not enough memory for this patch";
+  default:
+    return "The patch is damaged: download it again";
+  }
+}
+/* [patch] applied to [base], written beside it as the patch's name with the base's extension (" (2)" and on if
+ * taken). Its path in [made]; false with a notice on a failure. */
+static bool patch_apply(const unsigned char *patch, size_t pn, const char *patchPath, const char *base, char *made,
+                        size_t madeSize) {
+  size_t bn;
+  unsigned char *src = read_file(base, &bn, 512u << 20);
+  if (!src) {
+    notice("The original game couldn't be read");
+    return false;
+  }
+  uint8_t *out = NULL;
+  size_t outSize = 0;
+  int code = pk_patch_apply(src, bn, patch, pn, &out, &outSize);
+  free(src);
+  if (code != PK_PATCH_OK) {
+    notice(patch_error(code));
+    return false;
+  }
+  const char *pname = base_name(patchPath), *pdot = strrchr(pname, '.'), *bext = strrchr(base, '.');
+  int stem = pdot && pdot != pname ? (int)(pdot - pname) : (int)strlen(pname);
+  char dir[PATH_MAX * 2];
+  snprintf(dir, sizeof dir, "%.*s", (int)(base_name(base) - base), base);
+  snprintf(made, madeSize, "%s%.*s%s", dir, stem, pname, bext ? bext : ".gba");
+  for (int n = 2; exists(made) && n < 100; n++)
+    snprintf(made, madeSize, "%s%.*s (%d)%s", dir, stem, pname, n, bext ? bext : ".gba");
+  bool ok = write_file(made, out, outSize, true);
+  pk_patch_free(out);
+  notice(ok ? "The hack is ready in the game list" : "The hack couldn't be saved");
+  return ok;
+}
+
 static void exe_dir(const char *argv0) {
   char p[PATH_MAX];
 #ifdef _WIN32
@@ -2124,38 +2177,124 @@ int main(int argc, char **argv) {
     static char *paths[1024];
     static const char *names[1024];
     int count = 0;
-    char dirs[4096];
-    snprintf(dirs, sizeof dirs, "%s/roms%s%s", root, getenv("POCKET_ROM_DIRS") ? ":" : "",
-             getenv("POCKET_ROM_DIRS") ? getenv("POCKET_ROM_DIRS") : "");
-    char *save = NULL;
-    for (char *dir = strtok_r(dirs, ":", &save); dir; dir = strtok_r(NULL, ":", &save)) {
-      DIR *d = opendir(dir);
-      struct dirent *e;
-      while (d && (e = readdir(d)) && count < 1024) {
-        if (core_for(e->d_name)) {
-          snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
-          paths[count++] = strdup(path);
-        }
-      }
-      if (d)
-        closedir(d);
-    }
-    qsort(paths, count, sizeof(*paths), cmp);
-    for (int i = 0; i < count; i++)
-      names[i] = base_name(paths[i]);
     struct pd_menu list;
-    pd_menu_init(&list, "PokeDaisy Linux", names, count);
+    /* (Re)reads the list, [select] (a path) picked if it's there. */
+    #define SCAN_ROMS(select)                                                                                        \
+      do {                                                                                                             \
+        for (int i = 0; i < count; i++)                                                                                \
+          free(paths[i]);                                                                                              \
+        count = 0;                                                                                                     \
+        char dirs[4096];                                                                                               \
+        snprintf(dirs, sizeof dirs, "%s/roms%s%s", root, getenv("POCKET_ROM_DIRS") ? ":" : "",                         \
+                 getenv("POCKET_ROM_DIRS") ? getenv("POCKET_ROM_DIRS") : "");                                          \
+        char *save = NULL;                                                                                             \
+        for (char *dir = strtok_r(dirs, ":", &save); dir; dir = strtok_r(NULL, ":", &save)) {                          \
+          DIR *d = opendir(dir);                                                                                       \
+          struct dirent *e;                                                                                            \
+          while (d && (e = readdir(d)) && count < 1024) {                                                              \
+            if (core_for(e->d_name)) {                                                                                 \
+              snprintf(path, sizeof path, "%s/%s", dir, e->d_name);                                                    \
+              paths[count++] = strdup(path);                                                                           \
+            }                                                                                                          \
+          }                                                                                                            \
+          if (d)                                                                                                       \
+            closedir(d);                                                                                               \
+        }                                                                                                              \
+        qsort(paths, count, sizeof(*paths), cmp);                                                                      \
+        for (int i = 0; i < count; i++)                                                                                \
+          names[i] = base_name(paths[i]);                                                                              \
+        pd_menu_init(&list, "PokeDaisy Linux", names, count);                                                          \
+        const char *sel_ = (select);                                                                                   \
+        for (int i = 0; sel_ && i < count; i++)                                                                        \
+          if (!strcmp(paths[i], sel_))                                                                                 \
+            for (int k = 0; k < i; k++)                                                                                \
+              pd_menu_move(&list, 1);                                                                                  \
+      } while (0)
+    SCAN_ROMS((const char *)NULL);
+    // A dropped patch that doesn't name its original (IPS, xdelta): the list picks it, under this title.
+    unsigned char *pendingPatch = NULL;
+    size_t pendingSize = 0;
+    char pendingPath[4096] = "", made[PATH_MAX * 4];
+    if (getenv("POCKET_TEST_DROP")) // tests: a file dropped on the window
+      snprintf(droppedFile, sizeof droppedFile, "%s", getenv("POCKET_TEST_DROP"));
     int ticks = 0;
     while (running) {
       events();
       repeat_directions();
-      if (down(B) || down(MENU))
-        break;
+      if (droppedFile[0]) {
+        char dropped[4096];
+        snprintf(dropped, sizeof dropped, "%s", droppedFile);
+        droppedFile[0] = 0;
+        free(pendingPatch);
+        pendingPatch = NULL;
+        list.title = "PokeDaisy Linux";
+        size_t n;
+        unsigned char *d = read_file(dropped, &n, 512u << 20);
+        int format = d ? pk_patch_format(d, n) : PK_PATCH_UNKNOWN;
+        uint32_t crc;
+        uint64_t size;
+        if (!d)
+          notice("The file couldn't be read");
+        else if (format == PK_PATCH_UNKNOWN && core_for(dropped)) { // a game: into DATA/roms
+          snprintf(made, sizeof made, "%s/roms", root);
+          mkdir(made, 0755);
+          snprintf(made, sizeof made, "%s/roms/%s", root, base_name(dropped));
+          if (exists(made))
+            notice("That game is already in the list");
+          else if (write_file(made, d, n, true)) {
+            notice("Game added");
+            SCAN_ROMS(made);
+          } else
+            notice("The game couldn't be copied");
+        } else if (format == PK_PATCH_UNKNOWN)
+          notice("Drop a patch (.ips .ups .bps .xdelta) or a game");
+        else if (pk_patch_source_crc(d, n, &crc) && pk_patch_source_size(d, n, &size)) {
+          int found = -1;
+          for (int i = 0; i < count && found < 0; i++) {
+            struct stat st;
+            if (stat(paths[i], &st) || (uint64_t)st.st_size != size)
+              continue;
+            size_t bn;
+            unsigned char *b = read_file(paths[i], &bn, 512u << 20);
+            if (b && pk_crc32(b, bn) == crc)
+              found = i;
+            free(b);
+          }
+          if (found < 0) {
+            static char msg[64];
+            snprintf(msg, sizeof msg, "Original game not found (CRC32 %08X)", (unsigned)crc);
+            notice(msg);
+          } else if (patch_apply(d, n, dropped, paths[found], made, sizeof made))
+            SCAN_ROMS(made);
+        } else if (!count)
+          notice("Add the original game first");
+        else { // IPS / xdelta: the player picks the original
+          pendingPatch = d, pendingSize = n, d = NULL;
+          snprintf(pendingPath, sizeof pendingPath, "%s", dropped);
+          list.title = "PICK THE ORIGINAL GAME (B: CANCEL)";
+        }
+        free(d);
+      }
+      if (down(B) || down(MENU)) {
+        if (!pendingPatch)
+          break;
+        free(pendingPatch);
+        pendingPatch = NULL;
+        list.title = "PokeDaisy Linux";
+      }
       if (down(UP))
         pd_menu_move(&list, -1);
       if (down(DOWN))
         pd_menu_move(&list, 1);
-      if (down(A) && count)
+      if (down(A) && count && pendingPatch) {
+        notice("Patching...");
+        if (patch_apply(pendingPatch, pendingSize, pendingPath, paths[list.selected], made, sizeof made))
+          SCAN_ROMS(made);
+        else
+          list.title = "PokeDaisy Linux";
+        free(pendingPatch);
+        pendingPatch = NULL;
+      } else if (down(A) && count)
         appError = 0, run_game(paths[list.selected], 0, NULL, true); // the last game's result is the exit status
       SDL_RenderClear(renderer);
       overlay_begin();
@@ -2172,6 +2311,8 @@ int main(int argc, char **argv) {
     }
     for (int i = 0; i < count; i++)
       free(paths[i]);
+    free(pendingPatch);
+    #undef SCAN_ROMS
   }
   if (js)
     SDL_JoystickClose(js);

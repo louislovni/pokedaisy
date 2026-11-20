@@ -472,7 +472,7 @@ class LibraryActivity : ComponentActivity() {
     private fun libraryTools(): List<com.pokedaisy.app.companion.ui.LibraryTool> {
         val nf = com.pokedaisy.app.companion.NewFeatures
         return listOf(
-            com.pokedaisy.app.companion.ui.LibraryTool("PATCH", "PATCH A ROM", "Turn a .bps patch into a game", nf.badge(nf.ROM_PATCH)) {
+            com.pokedaisy.app.companion.ui.LibraryTool("PATCH", "PATCH A ROM", "Turn a .bps, .ups, .ips or .xdelta patch into a game", nf.badge(nf.ROM_PATCH)) {
                 pickPatch.launch(arrayOf("*/*"))
             },
             com.pokedaisy.app.companion.ui.LibraryTool("LINK", "LINK PLAY", "Trade and battle between your games", nf.badge(nf.LINK_PLAY)) {
@@ -1872,8 +1872,8 @@ class LibraryActivity : ComponentActivity() {
                     throw t
                 }
                 var name = RomUris.sanitizeFileName(RomUris.displayName(this, uri) ?: "imported-${System.currentTimeMillis()}.gba")
-                // A BPS patch picked as a ROM file (or opened with the app): PATCH A ROM takes it from here.
-                if (BpsPatch.looksLikeBps(tmp.inputStream().use { s -> ByteArray(4).also { s.read(it) } })) {
+                // A patch picked as a ROM file (or opened with the app): PATCH A ROM takes it from here.
+                if (RomPatchNative.looksLikePatch(tmp.inputStream().use { s -> ByteArray(5).also { s.read(it) } })) {
                     tmp.delete()
                     runOnUiThread { patcher.start(uri, name) }
                     return@Thread

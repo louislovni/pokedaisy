@@ -1,0 +1,4 @@
+xdelta3's library (Joshua MacDonald, Apache License 2.0: see each file's header), from the xdelta3 3.1 sources as
+packaged by xdelta3-python 0.0.5, unchanged. Capsule builds only its decoder (XD3_ENCODER=0) to apply .xdelta ROM
+patches, with its DJW and LZMA secondary compressors (not FGK, which xdelta3 calls experimental); LZMA goes through ../xz-shim on XZ Embedded (../xz-embedded,
+0BSD-style permission, see its COPYING).

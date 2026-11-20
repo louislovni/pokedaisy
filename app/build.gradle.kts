@@ -269,6 +269,8 @@ val licensesAsset by tasks.registering {
         "AndroidX, Jetpack Compose / Compose Multiplatform, Kotlin, kotlinx.atomicfu, kotlinx-datetime, Apache Commons Compress / IO / Codec / Lang, Firebase Crashlytics, ZXing, OkHttp, Okio - Apache License 2.0" to "third_party/licenses/Apache-2.0.txt",
         "Apache Commons - NOTICE" to "third_party/licenses/Apache-Commons-NOTICE.txt",
         "XZ for Java - BSD Zero Clause" to "third_party/licenses/XZ-Java-0BSD.txt",
+        "xdelta3 (PATCH A ROM's .xdelta) - Apache License 2.0" to "third_party/pkpatch/xdelta3/LICENSE",
+        "XZ Embedded (PATCH A ROM's .xdelta) - BSD Zero Clause" to "third_party/pkpatch/xz-embedded/COPYING",
         "Bouncy Castle (co-op) - MIT" to "third_party/licenses/BouncyCastle-MIT.txt",
     ).map { (name, path) -> name to rootProject.file(path) }
     inputs.files(parts.map { it.second })

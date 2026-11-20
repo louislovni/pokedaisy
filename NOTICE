@@ -135,6 +135,14 @@ The app shows every license below in full under Settings > LICENSES.
   Google Play services' play-services-basement and play-services-tasks, under
   the Android Software Development Kit License
   (https://developer.android.com/studio/terms).
+- xdelta3's decoder (third_party/pkpatch/xdelta3), Copyright Joshua MacDonald,
+  Apache License 2.0 - https://github.com/jmacd/xdelta: applies .xdelta ROM
+  patches (PATCH A ROM, the PC host). Unchanged, built decode-only.
+- XZ Embedded (third_party/pkpatch/xz-embedded), the XZ Embedded authors,
+  BSD Zero Clause - https://github.com/tukaani-project/xz-embedded: the LZMA2
+  decoder behind xdelta3's compression.
+- pk_patch.c (third_party/pkpatch), from Capsule (louislovni/capsule): IPS,
+  UPS, BPS and xdelta patches.
 - Bouncy Castle (its X25519 and X25519Field, copied into
   companion/coop/x25519/), Copyright (c) 2000-2024 The Legion of the Bouncy Castle
   Inc., MIT License (third_party/licenses/BouncyCastle-MIT.txt) -
