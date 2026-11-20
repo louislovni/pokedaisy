@@ -306,7 +306,11 @@ object CapsuleCloud {
             .put("device", sv("Android " + android.os.Build.MODEL)))
         val oldVersion = old?.str("version")
         if (old != null && !oldVersion.isNullOrEmpty() && oldVersion != version) {
-            for (i in 0 until old.int("chunks")) runCatching { delete("chunks/${id}_${oldVersion}_$i") }
+            // The version replaced goes into the game's cloud history (its pieces kept), for every device's history
+            // ([syncHistory]); one that can't be kept is deleted as before.
+            val entry = JSONObject(old.fields.toString()).put("fileId", sv(id))
+            if (runCatching { set("history/${id}_$oldVersion", entry) }.isFailure)
+                for (i in 0 until old.int("chunks")) runCatching { delete("chunks/${id}_${oldVersion}_$i") }
         }
     }
 
@@ -327,12 +331,58 @@ object CapsuleCloud {
         return "rom:%08X".format(crc)
     }
 
-    private fun Store.download(d: Doc): ByteArray {
+    /** The versions a game's cloud history keeps (as SAVE HISTORY here: 20). */
+    private const val HISTORY_KEEP = 20
+
+    /** The cloud's history for the games here (older versions of their saves, from any device) comes down into
+     * their save backups (SAVE HISTORY / RESTORE BACKUP, by when each was saved), each once; one already here (the
+     * same core as a backup or the save) is skipped. Past [HISTORY_KEEP] a game's oldest go. Capsule's iPhone app and
+     * PC launcher do the same. */
+    private fun Store.syncHistory(saveOf: Map<String, File>, manifest: JSONObject) {
+        val entries = runCatching { list("history") }.getOrNull() ?: return
+        val stampFormat = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
+        fun date(d: Doc) = d.time("modifiedAt").takeIf { it > 0 } ?: d.time("updatedAt")
+        for ((key, all) in entries.groupBy { it.str("name").orEmpty() }) {
+            val list = all.sortedByDescending(::date)
+            for (d in list.drop(HISTORY_KEEP)) runCatching {
+                val version = d.str("version")
+                val fileId = d.str("fileId")
+                if (version != null && fileId != null) for (i in 0 until d.int("chunks")) runCatching { delete("chunks/${fileId}_${version}_$i") }
+                delete("history/${d.id}")
+            }
+            val save = saveOf[key] ?: continue
+            var have: MutableSet<String>? = null   // the cores here: read once a game has something new to look at
+            for (d in list.take(HISTORY_KEEP)) {
+                if (manifest.optString("history:${d.id}").isNotEmpty()) continue
+                val cores = have ?: HashSet<String>().also { set ->
+                    runCatching { set += coreHash(save.readBytes()) }
+                    SaveBackups.list(save).forEach { f -> runCatching { set += coreHash(f.readBytes()) } }
+                    have = set
+                }
+                if (d.str("core")?.let { it in cores } == true) {
+                    manifest.put("history:${d.id}", "1")
+                    continue
+                }
+                val fileId = d.str("fileId") ?: continue
+                val data = runCatching { download(d, fileId) }.getOrNull() ?: continue
+                val dir = SaveBackups.dir(save)
+                val out = File(dir, "${save.nameWithoutExtension}.backup-${stampFormat.format(Date(date(d)))}.${save.extension}")
+                if (!out.exists()) {
+                    val ok = runCatching { dir.mkdirs(); out.writeBytes(data); out.setLastModified(date(d)) }.isSuccess
+                    if (!ok) continue
+                }
+                cores += coreHash(data)
+                manifest.put("history:${d.id}", "1")
+            }
+        }
+    }
+
+    private fun Store.download(d: Doc, fileId: String = d.id): ByteArray {
         val version = d.str("version") ?: throw IllegalStateException("fichier incomplet dans le cloud")
         val sum = d.str("hash") ?: throw IllegalStateException("fichier incomplet dans le cloud")
         val text = StringBuilder()
         for (i in 0 until d.int("chunks")) {
-            text.append(get("chunks/${d.id}_${version}_$i")?.str("data") ?: throw IllegalStateException("morceau manquant dans le cloud"))
+            text.append(get("chunks/${fileId}_${version}_$i")?.str("data") ?: throw IllegalStateException("morceau manquant dans le cloud"))
         }
         val data = Base64.decode(text.toString(), Base64.DEFAULT)
         if (hash(data) != sum) throw IllegalStateException("fichier abîmé dans le cloud")
@@ -398,12 +448,14 @@ object CapsuleCloud {
                 )
                 val roms = library.associateBy { RomArchive.saveNames(it).first() + ".sav" }
                 val keysTaken = HashSet<String>()
+                val saveOf = HashMap<String, File>()   // a game's key -> its save here, for the cloud's history
                 for ((fileName, file) in games) {
                     if (pushOnly != null && fileName != pushOnly) continue
                     // Saves go by their game ([romKey]); one uploaded by its file name (older versions) is the game's
                     // too, the newer of the two if both are there; the old copy goes once this one is synced.
                     val key = roms[fileName]?.let { romKey(context, it) }?.takeIf { keysTaken.add(it) }
                     val name = key ?: fileName
+                    saveOf[name] = file
                     val old = if (key != null) cloud[fileName] else null
                     if (key != null && manifest.optString(key).isEmpty() && manifest.optString(fileName).isNotEmpty()) {
                         manifest.put(key, manifest.optString(fileName)).put("core:$key", manifest.optString("core:$fileName").ifEmpty { null })
@@ -478,7 +530,10 @@ object CapsuleCloud {
                         if (error == null) error = "${fileName.removeSuffix(".sav")} : ${e.message}"
                     }
                 }
-                if (pushOnly == null) store(context).edit().putLong("lastSync", System.currentTimeMillis()).apply()
+                if (pushOnly == null) {
+                    s.syncHistory(saveOf, manifest)
+                    store(context).edit().putLong("lastSync", System.currentTimeMillis()).apply()
+                }
             } catch (e: Exception) {
                 error = e.message ?: e.toString()
             }
