@@ -287,6 +287,16 @@ interface CompanionSettings {
      * the save. Caller (the UI) is expected to confirm before calling this. */
     fun restartGame()
 
+    /** SAVE HISTORY (Capsule's build, under RESTART GAME) is offered. */
+    val offersSaveHistory: Boolean get() = false
+
+    /** SAVE HISTORY's list: the save's backups to go back to, newest first, as (label, id). Reads files: on a tap only. */
+    fun saveHistory(): List<Pair<String, String>> = emptyList()
+
+    /** Goes back to the backup [id] from [saveHistory]: the game stops, the save it has now is backed up (so it can be
+     * undone), the backup becomes the save and the game boots on it. The UI confirms first. */
+    fun restoreSave(id: String) {}
+
     /** Ends the session and returns to the ROM list — same as backing out of
      * the game normally, so progress is suspended/saved the usual way via the
      * activity lifecycle. Caller (the UI) is expected to confirm first. */

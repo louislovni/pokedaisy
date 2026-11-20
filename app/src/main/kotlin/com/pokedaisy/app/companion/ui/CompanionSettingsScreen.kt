@@ -348,6 +348,32 @@ fun CompanionSettingsScreen(
                                         )
                                     })
                                 }
+                                // SAVE HISTORY (Capsule's build): back to an earlier save, the game restarted on it.
+                                if (settings.offersSaveHistory) {
+                                    OptionButton(
+                                        tk("SAVE HISTORY"), m,
+                                        modifier = Modifier.fillMaxWidth().padding(start = m.u * 10, end = m.u * 10, bottom = m.u * 8),
+                                        onClick = {
+                                            val history = settings.saveHistory()
+                                            if (history.isEmpty()) {
+                                                confirm = Confirm(tk("SAVE HISTORY"), tr("No earlier save yet. A copy is kept each time you save in the game."), tk("OK")) {}
+                                            } else {
+                                                val ids = history.toMap()
+                                                selector = Selector(
+                                                    tk("SAVE HISTORY"), history.map { it.first }, "",
+                                                    note = tr("Pick a save to go back to. The one you have now stays in the list."),
+                                                ) { label ->
+                                                    val id = ids[label] ?: return@Selector
+                                                    confirm = Confirm(
+                                                        tk("GO BACK TO THIS SAVE?"),
+                                                        tr("The game restarts on the save from {0}. Your current save stays in the history, so you can come back to it.", label),
+                                                        tk("GO BACK TO IT"),
+                                                    ) { settings.restoreSave(id) }
+                                                }
+                                            }
+                                        },
+                                    )
+                                }
                                 // Its screen for other apps while the game keeps running; BACK on the game reopens it. Closed while
                                 // swapped, this companion is the one over the game: OPEN COMPANION puts it back on its own screen.
                                 if (settings.canCloseCompanion) {

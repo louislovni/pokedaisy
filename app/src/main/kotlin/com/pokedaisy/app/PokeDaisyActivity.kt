@@ -2327,6 +2327,9 @@ class PokeDaisyActivity : Activity() {
             hotkeys = Hotkeys.load(getExternalFilesDir(null) ?: filesDir)
         }
         override fun restartGame() = this@PokeDaisyActivity.restartGame()
+        override val offersSaveHistory get() = PureAdventure.on && !romIs3ds
+        override fun saveHistory() = this@PokeDaisyActivity.saveHistory()
+        override fun restoreSave(id: String) = runOnUiThread { this@PokeDaisyActivity.restoreSave(File(id)) }
         override fun closeGame() {
             exitGame()   // drives the normal onPause()/onStop() lifecycle, which already suspends+saves
         }
@@ -6547,7 +6550,51 @@ class PokeDaisyActivity : Activity() {
     }
 
     /** RESTART GAME (SETTINGS, and its hotkey): the game booted again from its save, the resume state dropped. */
-    private fun restartGame() {
+    /** SAVE HISTORY's list: the running save's backups (the backups folder and LOAD SAVE's old saves beside it), newest
+     * first, labelled by date and time - TODAY for today's, NOW on those equal to the save. */
+    private fun saveHistory(): List<Pair<String, String>> {
+        val r = rom ?: return emptyList()
+        val save = SavesLocation.saveFor(this, Prefs(this), r)
+        val dir = save.parentFile ?: return emptyList()
+        val files = (SaveBackups.list(save) + RomArchive.saveNames(r).flatMap { GameSaves.backups(dir, it) })
+            .distinctBy { it.absolutePath }
+            .sortedByDescending { it.name.substringAfter(".backup-") }
+            .take(25)
+        val current = runCatching { save.readBytes() }.getOrNull()
+        val today = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
+        val stampFormat = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+        val dayFormat = java.text.DateFormat.getDateInstance(java.text.DateFormat.SHORT)
+        val timeFormat = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+        val seen = HashSet<String>()
+        return files.mapNotNull { f ->
+            val stamp = f.name.substringAfter(".backup-").substringBefore('.')
+            val date = runCatching { stampFormat.parse(stamp) }.getOrNull() ?: return@mapNotNull null
+            val day = if (stamp.startsWith(today)) com.pokedaisy.app.companion.i18n.tk("TODAY") else dayFormat.format(date)
+            val same = current != null && runCatching { SaveBackups.sameSave(f.readBytes(), current) }.getOrDefault(false)
+            var label = "$day ${timeFormat.format(date)}" + if (same) "  (" + com.pokedaisy.app.companion.i18n.tk("CURRENT") + ")" else ""
+            while (!seen.add(label)) label += " "   // the pick-list goes by label: two alike kept apart
+            label to f.absolutePath
+        }
+    }
+
+    /** SAVE HISTORY's pick: [backup] becomes the save and the game boots on it (RESTART GAME's way); the save it had is
+     * backed up first, so going back can be undone. */
+    private fun restoreSave(backup: File) {
+        val bytes = runCatching { backup.readBytes() }.getOrNull()   // before the backup below could prune it
+        if (bytes == null || bytes.isEmpty()) {
+            showHud(com.pokedaisy.app.companion.i18n.tr("Couldn't read {0}", backup.name))
+            return
+        }
+        restartGame { save ->
+            SaveBackups.snapshot(save, force = true)
+            val tmp = File(save.parentFile, "${save.name}.tmp")
+            val ok = runCatching { tmp.writeBytes(bytes); tmp.renameTo(save) }.getOrDefault(false)
+            if (!ok) tmp.delete()
+            ok
+        }
+    }
+
+    private fun restartGame(beforeBoot: ((File) -> Boolean)? = null) {
         if (coopRefuses()) return
         val r = rom ?: return
         if (romIs3ds) { endN3ds(); load3ds(r); startGame(); return }
@@ -6564,6 +6611,8 @@ class PokeDaisyActivity : Activity() {
             com.pokedaisy.app.companion.data.SnapshotCache.fileFor(it.toOkioPath()).delete()
         }
         val save = SavesLocation.saveFor(this, Prefs(this), r)
+        // SAVE HISTORY: the save swapped while the core is stopped (it has let go of the file).
+        val restored = beforeBoot?.invoke(save)
         syncCheats()
         waitForPlay()
         // DS CORE changed while the game ran: the restart is on the new one.
@@ -6573,7 +6622,11 @@ class PokeDaisyActivity : Activity() {
             if (was != dsperate) syncGameScreen()
         }
         engine.start(romData ?: r, save, null)
-        showHud(com.pokedaisy.app.companion.i18n.tr("Game restarted"))
+        showHud(com.pokedaisy.app.companion.i18n.tr(when (restored) {
+            null -> "Game restarted"
+            true -> "Back to the earlier save"
+            false -> "Couldn't go back to that save"
+        }))
     }
 
     /**
