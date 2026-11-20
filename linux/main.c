@@ -594,6 +594,24 @@ static bool same_save(const unsigned char *a, size_t an, const unsigned char *b,
   return !memcmp(a, b, n);
 }
 static int newest_first(const void *a, const void *b) { return -strcmp(*(char *const *)a, *(char *const *)b); }
+/* [sav]'s backups in [dir], newest first (names to free); [stem] / [ext] get their name's parts. */
+static int backup_names(const char *sav, const char *dir, char **list, int max, char *stem, size_t stemSize, char *ext,
+                        size_t extSize) {
+  const char *file = strrchr(sav, '/');
+  file = file ? file + 1 : sav;
+  const char *dot = strrchr(file, '.');
+  snprintf(stem, stemSize, "%.*s.backup-", dot && dot != file ? (int)(dot - file) : (int)strlen(file), file);
+  snprintf(ext, extSize, "%s", dot && dot != file ? dot + 1 : "sav");
+  int count = 0;
+  DIR *dd = opendir(dir);
+  for (struct dirent *e; dd && (e = readdir(dd)) && count < max;)
+    if (!strncmp(e->d_name, stem, strlen(stem)) && !strstr(e->d_name, ".tmp"))
+      list[count++] = strdup(e->d_name);
+  if (dd)
+    closedir(dd);
+  qsort(list, count, sizeof *list, newest_first);
+  return count;
+}
 static bool save_backup(const char *sav, const char *dir) {
   size_t n;
   unsigned char *d = read_file(sav, &n, 64u << 20);
@@ -604,22 +622,9 @@ static bool save_backup(const char *sav, const char *dir) {
     return true;
   }
   mkdir(dir, 0755);
-  const char *file = strrchr(sav, '/');
-  file = file ? file + 1 : sav;
-  const char *dot = strrchr(file, '.');
-  char stem[512], ext[32] = "sav";
-  snprintf(stem, sizeof stem, "%.*s.backup-", dot && dot != file ? (int)(dot - file) : (int)strlen(file), file);
-  if (dot && dot != file)
-    snprintf(ext, sizeof ext, "%s", dot + 1);
+  char stem[512], ext[32];
   char *list[256];
-  int count = 0;
-  DIR *dd = opendir(dir);
-  for (struct dirent *e; dd && (e = readdir(dd)) && count < 256;)
-    if (!strncmp(e->d_name, stem, strlen(stem)) && !strstr(e->d_name, ".tmp"))
-      list[count++] = strdup(e->d_name);
-  if (dd)
-    closedir(dd);
-  qsort(list, count, sizeof *list, newest_first);
+  int count = backup_names(sav, dir, list, 256, stem, sizeof stem, ext, sizeof ext);
   bool write = true, ok = true;
   char path[PATH_MAX * 4 + 64];
   if (count) {
@@ -632,7 +637,13 @@ static bool save_backup(const char *sav, const char *dir) {
   if (write) {
     char stamp[32];
     time_t now = time(NULL);
-    strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", localtime(&now));
+    // Always after the newest: two in one second (SAVE HISTORY's backup, then the reopened game's) kept apart.
+    for (int tries = 0; tries < 120; tries++, now++) {
+      strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", localtime(&now));
+      snprintf(path, sizeof path, "%s%s.%s", stem, stamp, ext);
+      if (!count || strcmp(path, list[0]) > 0)
+        break;
+    }
     snprintf(path, sizeof path, "%s/%s%s.%s", dir, stem, stamp, ext);
     ok = write_file(path, d, n, true);
   }
@@ -1451,7 +1462,63 @@ extern int pd_ds_run(const char *, const char *, int, const char *, SDL_Renderer
 static bool ds_running(void) { return running != 0; }
 #endif
 // The host menu's rows, top to bottom (fast-forward is the FAST FORWARD hotkey's, held).
-enum { M_RESUME, M_SAVE, M_LOAD, M_HOTKEYS, M_REWIND, M_FFSPEED, M_LCD, M_FRAME, M_SWAP, M_QUIT, M_COUNT };
+enum { M_RESUME, M_SAVE, M_LOAD, M_HISTORY, M_HOTKEYS, M_REWIND, M_FFSPEED, M_LCD, M_FRAME, M_SWAP, M_QUIT, M_COUNT };
+/* SAVE HISTORY (the host menu, Capsule's build): the save's backups to go back to, newest first, by date. A pick asks
+ * first; then the game closes (its progress written and backed up like any other, so going back can be undone), the
+ * backup becomes the save and the game opens again on it. */
+#define HISTORY_MAX 24
+static struct {
+  char files[HISTORY_MAX][PATH_MAX * 2 + 512]; // a backups folder (PATH_MAX * 2) + a file name
+  char rows[HISTORY_MAX][48];
+  const char *ptrs[HISTORY_MAX];
+  int count;
+} history;
+static char restoreFrom[PATH_MAX * 2 + 512]; // the backup to open the game on, once it has closed ("" = none)
+static void history_load(const char *sav, const char *dir) {
+  char stem[512], ext[32], *list[256];
+  int count = backup_names(sav, dir, list, 256, stem, sizeof stem, ext, sizeof ext);
+  size_t cn = 0;
+  unsigned char *cur = read_file(sav, &cn, 64u << 20);
+  time_t now = time(NULL);
+  struct tm today = *localtime(&now);
+  history.count = 0;
+  for (int i = 0; i < count; i++) {
+    if (history.count < HISTORY_MAX) {
+      int y, mo, d, h, mi, sec;
+      const char *stamp = list[i] + strlen(stem);
+      if (sscanf(stamp, "%4d%2d%2d-%2d%2d%2d", &y, &mo, &d, &h, &mi, &sec) == 6) {
+        int k = history.count++;
+        snprintf(history.files[k], sizeof history.files[k], "%s/%s", dir, list[i]);
+        size_t bn;
+        unsigned char *b = cur ? read_file(history.files[k], &bn, 64u << 20) : NULL;
+        bool same = b && same_save(b, bn, cur, cn);
+        free(b);
+        unsigned char dd = d % 100, mm = mo % 100, hh = h % 100, nn = mi % 100, ss = sec % 100;
+        unsigned short yy = y % 10000;
+        if (y == today.tm_year + 1900 && mo == today.tm_mon + 1 && d == today.tm_mday)
+          snprintf(history.rows[k], sizeof history.rows[k], "TODAY %02u:%02u:%02u%s", hh, nn, ss, same ? "  (NOW)" : "");
+        else
+          snprintf(history.rows[k], sizeof history.rows[k], "%02u/%02u/%04u %02u:%02u:%02u%s", dd, mm, yy, hh, nn, ss,
+                   same ? "  (NOW)" : "");
+        history.ptrs[k] = history.rows[k];
+      }
+    }
+    free(list[i]);
+  }
+  free(cur);
+}
+/* After the game has closed: the save becomes [restoreFrom]'s copy (what it was is backed up first). */
+static bool history_restore(const char *sav, const char *dir) {
+  size_t n;
+  unsigned char *d = read_file(restoreFrom, &n, 64u << 20); // read before the backup below could prune it
+  restoreFrom[0] = 0;
+  if (!d)
+    return false;
+  bool ok = save_backup(sav, dir) && write_file(sav, d, n, true);
+  free(d);
+  return ok;
+}
+
 static void run_game(const char *path, int maxFrames, const char *shot, bool fromList) {
 #ifdef POCKET_DSPERATE
   const char *ext = strrchr(path, '.');
@@ -1570,7 +1637,8 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
   static char rows[M_COUNT][40], hkRows[HK_ACTIONS + 1][40];
   static const char *rowPtrs[M_COUNT], *hkPtrs[HK_ACTIONS + 1];
   static const char *const hkNames[HK_ACTIONS] = {"FAST FORWARD", "REWIND", "SAVE STATE", "LOAD STATE"};
-  bool hkPage = false;
+  bool hkPage = false, histPage = false;
+  struct pd_menu histMenu;
   unsigned latched = 0, menuConsumed = 0;
   bool modifierPending = false, modifierUsed = false;
   int pulseLeft = 0; // frames the modifier's own tap still reaches the game
@@ -1610,13 +1678,14 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     snprintf(rows[M_FRAME], 40, "CAPSULE FRAME  %s", hostSet.capsuleFrame ? "ON" : "OFF");
     snprintf(rows[M_SWAP], 40, "A/B BUTTONS  %s", hostSet.swapAB ? "SWAPPED" : "NORMAL");
     snprintf(rows[M_HOTKEYS], 40, "HOTKEYS");
+    snprintf(rows[M_HISTORY], 40, "SAVE HISTORY");
     snprintf(rows[M_QUIT], 40, fromList ? "QUIT TO GAME LIST" : "QUIT");
     // The rows shown, each mapped to its M_ id (without states and rewind in a pure build).
     int menuMap[M_COUNT], menuRows = 0;
     for (int i = 0; i < M_COUNT; i++) {
       if (pure && (i == M_SAVE || i == M_LOAD || i == M_REWIND))
         continue;
-      if (!pure && i == M_FRAME) // Capsule's build only
+      if (!pure && (i == M_FRAME || i == M_HISTORY)) // Capsule's build only
         continue;
       rowPtrs[menuRows] = rows[i];
       menuMap[menuRows++] = i;
@@ -1644,7 +1713,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     }
     if (menuKey) {
       menuOpen = !menuOpen;
-      hkPage = false;
+      hkPage = histPage = false;
       confirming = 0;
       capturing = -1;
       if (menuOpen) {
@@ -1736,8 +1805,26 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
           menuOpen = false;
         } else if (confirmMenu.selected == 1 && confirming == M_QUIT) {
           leave = true;
+        } else if (confirmMenu.selected == 1 && confirming == M_HISTORY) {
+          snprintf(restoreFrom, sizeof restoreFrom, "%s", history.files[histMenu.selected]);
+          fprintf(stderr, "pokedaisy: SAVE HISTORY back to %s\n", restoreFrom);
+          leave = true;
         }
         confirming = 0;
+      }
+    } else if (menuOpen && histPage) {
+      if (down(UP))
+        pd_menu_move(&histMenu, -1);
+      if (down(DOWN))
+        pd_menu_move(&histMenu, 1);
+      if (down(B))
+        histPage = false;
+      if (down(A) && history.count) {
+        confirming = M_HISTORY;
+        confirmRows[0] = "CANCEL";
+        confirmRows[1] = "GO BACK TO THIS SAVE";
+        pd_menu_init(&confirmMenu, "THE GAME RESTARTS ON IT", confirmRows, 2);
+        confirmMenu.overlay = true;
       }
     } else if (menuOpen && hkPage) {
       if (down(UP))
@@ -1802,6 +1889,17 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
           held = 0; // the button that chose this is now the other one: let it go
           host_save();
           break;
+        case M_HISTORY:
+          sram_write(sav, &sramCopy, true); // the newest progress on disk, to tell which one is now
+          history_load(sav, backups);
+          if (!history.count) {
+            notice("No earlier save yet");
+            break;
+          }
+          histPage = true;
+          pd_menu_init(&histMenu, "SAVE HISTORY", history.ptrs, history.count);
+          histMenu.overlay = true;
+          break;
         case M_HOTKEYS:
           hkPage = true;
           pd_menu_init(&hkMenu, "HOTKEYS", hkPtrs, hkRowCount);
@@ -1820,7 +1918,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     if (menuFrame) {
       muted = true;
       gameKeys = 0;
-      present_game(menuOpen ? (confirming ? &confirmMenu : hkPage ? &hkMenu : &menu) : NULL);
+      present_game(menuOpen ? (confirming ? &confirmMenu : hkPage ? &hkMenu : histPage ? &histMenu : &menu) : NULL);
       if (maxFrames && ++frames >= maxFrames) { // a scripted run can end, and be captured, with the menu up
         if (shot && !capture(shot))
           appError = 1;
@@ -1891,6 +1989,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
   }
   sram_write(sav, &sramCopy, true);
   free(sramCopy.data);
+  bool restored = restoreFrom[0] && history_restore(sav, backups);
   rewind_clear();
   core.unload_game();
   core.deinit();
@@ -1901,6 +2000,10 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     SDL_ClearQueuedAudio(audio);
   muted = false;
   held = pressed = 0;
+  if (restored) { // SAVE HISTORY: the same game again, on the save picked
+    notice("Back to the earlier save");
+    run_game(path, maxFrames, shot, fromList);
+  }
 }
 
 // By the file name, whichever folder it is in.
