@@ -9,6 +9,7 @@
 #include "display_filter.h"
 #include "pd_canvas.h"
 #include "pd_menu.h"
+#include "pd_style.h"
 #include "pk_patch.h"
 #include <SDL.h>
 #include <dirent.h>
@@ -1525,6 +1526,70 @@ static bool history_restore(const char *sav, const char *dir) {
   return ok;
 }
 
+/* COMPATIBLE GAMES (the game list's X / Y, Capsule's build): the games Capsule knows, the player's own recognised by their
+ * fingerprint. Capsule.exe writes DATA/capsule/compat.txt at each start (windows/launcher/compat.go in louislovni/capsule):
+ * a line a row, "H" (a group's title) or "G" (a game), its row and its details ("\n" between lines), tab-separated. */
+#define COMPAT_MAX 768
+static struct {
+  int count;
+  char *rows[COMPAT_MAX], *details[COMPAT_MAX];
+  const char *ptrs[COMPAT_MAX];
+} compat;
+static void compat_load(void) {
+  for (int i = 0; i < compat.count; i++)
+    free(compat.rows[i]), free(compat.details[i]);
+  compat.count = 0;
+  char path[PATH_MAX * 2];
+  snprintf(path, sizeof path, "%s/capsule/compat.txt", root);
+  size_t n;
+  char *text = (char *)read_file(path, &n, 4u << 20);
+  if (!text)
+    return;
+  char *buf = realloc(text, n + 1);
+  if (!buf) {
+    free(text);
+    return;
+  }
+  buf[n] = 0;
+  for (char *line = buf, *next; line && *line && compat.count < COMPAT_MAX; line = next) {
+    next = strchr(line, '\n');
+    if (next)
+      *next++ = 0;
+    size_t len = strlen(line);
+    if (len && line[len - 1] == '\r')
+      line[len - 1] = 0;
+    char *row = strchr(line, '\t');
+    if (!row || (line[0] != 'H' && line[0] != 'G'))
+      continue;
+    *row++ = 0;
+    char *detail = strchr(row, '\t');
+    if (detail)
+      *detail++ = 0;
+    char *d = strdup(detail ? detail : "");
+    // "\n" in the file: a new line in the details.
+    char *w = d;
+    for (const char *r = d; *r; r++) {
+      if (r[0] == '\\' && r[1] == 'n') {
+        *w++ = '\n';
+        r++;
+      } else
+        *w++ = *r;
+    }
+    *w = 0;
+    int k = compat.count++;
+    compat.rows[k] = strdup(row);
+    compat.details[k] = d;
+    compat.ptrs[k] = compat.rows[k];
+  }
+  free(buf);
+}
+/* A game's details over the lower part of the list, wrapped. */
+static void compat_detail_draw(const char *text) {
+  int x = 8, w = overlay.w - 16, h = overlay.h / 2, y = overlay.h - h - 8;
+  int f = pd_list_box(&overlay, x, y, w, h);
+  pd_text_wrap(&overlay, x + f + 6, y + f + 4, w - 2 * f - 12, 16, (h - 2 * f - 8) / 16, text, PD_LABEL, PD_LABEL_SHADOW);
+}
+
 static void run_game(const char *path, int maxFrames, const char *shot, bool fromList) {
 #ifdef POCKET_DSPERATE
   const char *ext = strrchr(path, '.');
@@ -2177,7 +2242,12 @@ int main(int argc, char **argv) {
     static char *paths[1024];
     static const char *names[1024];
     int count = 0;
-    struct pd_menu list;
+    struct pd_menu list, compatMenu;
+    // Capsule's build with Capsule.exe's list: X / Y open COMPATIBLE GAMES (compat_load).
+    if (pure)
+      compat_load();
+    const char *listTitle = compat.count ? "PokeDaisy   X / Y / Tab : jeux compatibles" : "PokeDaisy Linux";
+    bool compatOpen = false, compatDetail = false;
     /* (Re)reads the list, [select] (a path) picked if it's there. */
     #define SCAN_ROMS(select)                                                                                        \
       do {                                                                                                             \
@@ -2203,7 +2273,7 @@ int main(int argc, char **argv) {
         qsort(paths, count, sizeof(*paths), cmp);                                                                      \
         for (int i = 0; i < count; i++)                                                                                \
           names[i] = base_name(paths[i]);                                                                              \
-        pd_menu_init(&list, "PokeDaisy Linux", names, count);                                                          \
+        pd_menu_init(&list, listTitle, names, count);                                                                  \
         const char *sel_ = (select);                                                                                   \
         for (int i = 0; sel_ && i < count; i++)                                                                        \
           if (!strcmp(paths[i], sel_))                                                                                 \
@@ -2227,7 +2297,7 @@ int main(int argc, char **argv) {
         droppedFile[0] = 0;
         free(pendingPatch);
         pendingPatch = NULL;
-        list.title = "PokeDaisy Linux";
+        list.title = listTitle;
         size_t n;
         unsigned char *d = read_file(dropped, &n, 512u << 20);
         int format = d ? pk_patch_format(d, n) : PK_PATCH_UNKNOWN;
@@ -2275,12 +2345,50 @@ int main(int argc, char **argv) {
         }
         free(d);
       }
+      if (compatOpen) { // COMPATIBLE GAMES: A a game's details, B back (the details first)
+        if (down(UP))
+          compatDetail = false, pd_menu_move(&compatMenu, -1);
+        if (down(DOWN))
+          compatDetail = false, pd_menu_move(&compatMenu, 1);
+        if (down(A))
+          compatDetail = compat.details[compatMenu.selected][0] && !compatDetail;
+        if (down(B) || down(MENU) || down(X) || down(Y)) {
+          if (compatDetail)
+            compatDetail = false;
+          else
+            compatOpen = false;
+        }
+        SDL_RenderClear(renderer);
+        overlay_begin();
+        pd_menu_draw(&compatMenu, &overlay);
+        if (compatDetail)
+          compat_detail_draw(compat.details[compatMenu.selected]);
+        overlay_notice();
+        overlay_draw(true);
+        SDL_RenderPresent(renderer);
+        if (frames && ++ticks >= frames) {
+          if (shot && !capture(shot))
+            appError = 1;
+          break;
+        }
+        SDL_Delay(16);
+        continue;
+      }
+      if (compat.count && !pendingPatch && (down(X) || down(Y))) {
+        compat_load(); // Capsule.exe may have written it again since
+        if (compat.count) {
+          pd_menu_init(&compatMenu, "JEUX COMPATIBLES", compat.ptrs, compat.count);
+          compatOpen = true;
+          compatDetail = false;
+          continue;
+        }
+      }
       if (down(B) || down(MENU)) {
         if (!pendingPatch)
           break;
         free(pendingPatch);
         pendingPatch = NULL;
-        list.title = "PokeDaisy Linux";
+        list.title = listTitle;
       }
       if (down(UP))
         pd_menu_move(&list, -1);
@@ -2291,7 +2399,7 @@ int main(int argc, char **argv) {
         if (patch_apply(pendingPatch, pendingSize, pendingPath, paths[list.selected], made, sizeof made))
           SCAN_ROMS(made);
         else
-          list.title = "PokeDaisy Linux";
+          list.title = listTitle;
         free(pendingPatch);
         pendingPatch = NULL;
       } else if (down(A) && count)
