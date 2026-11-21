@@ -11,6 +11,9 @@
 #include "pd_menu.h"
 #include "pd_style.h"
 #include "pk_patch.h"
+#ifdef CAPSULE_COOP
+#include "capsule_coop.h" // Capsule's co-op (JOUER A DEUX): its Windows build only
+#endif
 #include <SDL.h>
 #include <dirent.h>
 #include <dlfcn.h>
@@ -1469,7 +1472,7 @@ extern int pd_ds_run(const char *, const char *, int, const char *, SDL_Renderer
 static bool ds_running(void) { return running != 0; }
 #endif
 // The host menu's rows, top to bottom (fast-forward is the FAST FORWARD hotkey's, held).
-enum { M_RESUME, M_SAVE, M_LOAD, M_HISTORY, M_HOTKEYS, M_REWIND, M_FFSPEED, M_LCD, M_FRAME, M_SWAP, M_QUIT, M_COUNT };
+enum { M_RESUME, M_SAVE, M_LOAD, M_HISTORY, M_COOP, M_HOTKEYS, M_REWIND, M_FFSPEED, M_LCD, M_FRAME, M_SWAP, M_QUIT, M_COUNT };
 /* SAVE HISTORY (the host menu, Capsule's build): the save's backups to go back to, newest first, by date. A pick asks
  * first; then the game closes (its progress written and backed up like any other, so going back can be undone), the
  * backup becomes the save and the game opens again on it. */
@@ -1700,6 +1703,16 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     if (sramCopy.data)
       sramCopy.size = save_image(sramCopy.data);
   }
+#ifdef CAPSULE_COOP
+  if (!dsGame) {
+    // The core's co-op presence (pd_libretro.c), if it has it: Capsule's JOUER A DEUX for Emerald.
+    struct capsule_coop_core coop = {(int (*)(void))dlsym(core.dl, "retro_pd_coop_available"),
+                                     (int (*)(uint32_t, uint8_t *))dlsym(core.dl, "retro_pd_coop_frame"),
+                                     (void (*)(const uint8_t *, size_t, uint32_t))dlsym(core.dl, "retro_pd_coop_receive"),
+                                     (void (*)(void))dlsym(core.dl, "retro_pd_coop_stop")};
+    capsule_coop_game(rom, romSize, sav, &coop);
+  }
+#endif
   int rewindMB = getenv("POCKET_REWIND_MB") ? atoi(getenv("POCKET_REWIND_MB")) : 32;
   rewindBudget = (size_t)(rewindMB > 0 ? rewindMB : 32) << 20; // a bad value (negative, 0) is the default
   rewindTick = 0;
@@ -1708,8 +1721,11 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
   static char rows[M_COUNT][40], hkRows[HK_ACTIONS + 1][40];
   static const char *rowPtrs[M_COUNT], *hkPtrs[HK_ACTIONS + 1];
   static const char *const hkNames[HK_ACTIONS] = {"FAST FORWARD", "REWIND", "SAVE STATE", "LOAD STATE"};
-  bool hkPage = false, histPage = false;
-  struct pd_menu histMenu;
+  bool hkPage = false, histPage = false, coopPage = false;
+  struct pd_menu histMenu, coopMenu;
+#ifdef CAPSULE_COOP
+  static const char *coopPtrs[12];
+#endif
   unsigned latched = 0, menuConsumed = 0;
   bool modifierPending = false, modifierUsed = false;
   int pulseLeft = 0; // frames the modifier's own tap still reaches the game
@@ -1728,6 +1744,14 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
       due = frameStart;
     lastStart = frameStart;
     events();
+#ifdef CAPSULE_COOP
+    capsule_coop_poll();
+    {
+      const char *said = capsule_coop_notice();
+      if (said[0])
+        notice(said);
+    }
+#endif
     audio_check();
     repeat_directions();
     if (outputChanged) {
@@ -1750,6 +1774,12 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     snprintf(rows[M_SWAP], 40, "A/B BUTTONS  %s", hostSet.swapAB ? "SWAPPED" : "NORMAL");
     snprintf(rows[M_HOTKEYS], 40, "HOTKEYS");
     snprintf(rows[M_HISTORY], 40, "SAVE HISTORY");
+#ifdef CAPSULE_COOP
+    snprintf(rows[M_COOP], 40, "%s", capsule_coop_menu_row());
+    const bool coopRow = capsule_coop_offered();
+#else
+    const bool coopRow = false;
+#endif
     snprintf(rows[M_QUIT], 40, fromList ? "QUIT TO GAME LIST" : "QUIT");
     // The rows shown, each mapped to its M_ id (without states and rewind in a pure build).
     int menuMap[M_COUNT], menuRows = 0;
@@ -1757,6 +1787,8 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
       if (pure && (i == M_SAVE || i == M_LOAD || i == M_REWIND))
         continue;
       if (!pure && (i == M_FRAME || i == M_HISTORY)) // Capsule's build only
+        continue;
+      if (i == M_COOP && !coopRow)
         continue;
       rowPtrs[menuRows] = rows[i];
       menuMap[menuRows++] = i;
@@ -1784,7 +1816,11 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     }
     if (menuKey) {
       menuOpen = !menuOpen;
-      hkPage = histPage = false;
+#ifdef CAPSULE_COOP
+      if (coopPage)
+        capsule_coop_page_left();
+#endif
+      hkPage = histPage = coopPage = false;
       confirming = 0;
       capturing = -1;
       if (menuOpen) {
@@ -1883,6 +1919,30 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
         }
         confirming = 0;
       }
+#ifdef CAPSULE_COOP
+    } else if (menuOpen && coopPage) {
+      // JOUER A DEUX: its rows change as the pairing goes, so they are asked for every frame.
+      const char *title;
+      coopMenu.count = capsule_coop_page(&title, coopPtrs, 12);
+      coopMenu.title = title;
+      if (coopMenu.selected >= coopMenu.count)
+        coopMenu.selected = coopMenu.count - 1;
+      if (coopMenu.scroll > coopMenu.selected)
+        coopMenu.scroll = coopMenu.selected;
+      if (down(UP))
+        pd_menu_move(&coopMenu, -1);
+      if (down(DOWN))
+        pd_menu_move(&coopMenu, 1);
+      if (down(B) || (down(A) && capsule_coop_page_pick(coopMenu.selected))) {
+        capsule_coop_page_left();
+        coopPage = false;
+      } else if (down(A)) {
+        coopMenu.count = capsule_coop_page(&title, coopPtrs, 12);
+        coopMenu.title = title;
+        if (coopMenu.selected >= coopMenu.count)
+          coopMenu.selected = coopMenu.count - 1;
+      }
+#endif
     } else if (menuOpen && histPage) {
       if (down(UP))
         pd_menu_move(&histMenu, -1);
@@ -1971,6 +2031,16 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
           pd_menu_init(&histMenu, "SAVE HISTORY", history.ptrs, history.count);
           histMenu.overlay = true;
           break;
+#ifdef CAPSULE_COOP
+        case M_COOP: {
+          const char *title;
+          int n = capsule_coop_page(&title, coopPtrs, 12);
+          pd_menu_init(&coopMenu, title, coopPtrs, n);
+          coopMenu.overlay = true;
+          coopPage = true;
+          break;
+        }
+#endif
         case M_HOTKEYS:
           hkPage = true;
           pd_menu_init(&hkMenu, "HOTKEYS", hkPtrs, hkRowCount);
@@ -1989,7 +2059,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     if (menuFrame) {
       muted = true;
       gameKeys = 0;
-      present_game(menuOpen ? (confirming ? &confirmMenu : hkPage ? &hkMenu : histPage ? &histMenu : &menu) : NULL);
+      present_game(menuOpen ? (confirming ? &confirmMenu : hkPage ? &hkMenu : histPage ? &histMenu : coopPage ? &coopMenu : &menu) : NULL);
       if (maxFrames && ++frames >= maxFrames) { // a scripted run can end, and be captured, with the menu up
         if (shot && !capture(shot))
           appError = 1;
@@ -2024,6 +2094,9 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     } else {
       for (int i = 0; i < runs && running; i++) {
         core.run();
+#ifdef CAPSULE_COOP
+        capsule_coop_after_run();
+#endif
         if (modifierPulse && --pulseLeft <= 0) {
           gameKeys &= ~joypad(modifierPulse);
           modifierPulse = 0;
@@ -2062,6 +2135,9 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
   free(sramCopy.data);
   bool restored = restoreFrom[0] && history_restore(sav, backups);
   rewind_clear();
+#ifdef CAPSULE_COOP
+  capsule_coop_game_end();
+#endif
   core.unload_game();
   core.deinit();
   dlclose(core.dl);
@@ -2181,6 +2257,10 @@ int main(int argc, char **argv) {
   snprintf(savesDir, sizeof savesDir, "%s/saves", root);
   snprintf(hostIni, sizeof hostIni, "%s/host.ini", root);
   host_load();
+#ifdef CAPSULE_COOP
+  snprintf(path, sizeof path, "%s/coop", root);
+  capsule_coop_init(path);
+#endif
   comboMenu = !(getenv("POCKET_MENU_COMBO") && !strcmp(getenv("POCKET_MENU_COMBO"), "off"));
   // A window manager can give another window the focus over the game (plorpOS's in-game menu on the GKD): the
   // controller has to keep reaching the host then.
