@@ -2513,3 +2513,40 @@ RETRO_API int retro_pd_scene(int *out, int n) {
     out[i] = v[i];
   return k;
 }
+
+/* LIGHTS for a frontend's night (Capsule's iPhone shaders): each door and window glass on screen, as x, y, w, h in the
+ * frame's own 0..1 and a kind (0 door, 1 window), 5 floats a light. Returns how many (max). */
+RETRO_API int retro_pd_lights(float *out, int max) {
+#ifdef PD_ARMGBA
+  (void)out; (void)max;
+  return 0;
+#else
+  if (!haveGame || !PD_BE_IS_GBA() || COMPANION_OVER || quickOpen || max <= 0 || !wideSupported)
+    return 0;
+  if (max > 64)
+    max = 64;
+  // The GBA screen's pixels -> the canvas: EXPAND's window drawn at its whole scale in the middle, else the frame's.
+  int scale, ox, oy;
+  struct PkWideView v = {0, 0, 240, 160};
+  if (wideReady) {
+    scale = game_scale(wideW, wideH);
+    v = (struct PkWideView){(240 - (int)wideW) / 2, (160 - (int)wideH) / 2, (int)wideW, (int)wideH}; // as wide_rect has it
+    ox = (CW - (int)wideW * scale) / 2 - v.x * scale;
+    oy = (CH - (int)wideH * scale) / 2 - v.y * scale;
+  } else {
+    scale = game_scale(gameW, gameH);
+    ox = (CW - (int)gameW * scale) / 2;
+    oy = (CH - (int)gameH * scale) / 2;
+  }
+  int raw[64 * 5];
+  int n = pk_wide_lights(v.x, v.y, v.x + v.w, v.y + v.h, raw, max);
+  for (int i = 0; i < n; i++) {
+    out[5 * i] = (float)(ox + raw[5 * i] * scale) / (float)CW;
+    out[5 * i + 1] = (float)(oy + raw[5 * i + 1] * scale) / (float)CH;
+    out[5 * i + 2] = (float)(raw[5 * i + 2] * scale) / (float)CW;
+    out[5 * i + 3] = (float)(raw[5 * i + 3] * scale) / (float)CH;
+    out[5 * i + 4] = (float)raw[5 * i + 4];
+  }
+  return n;
+#endif
+}

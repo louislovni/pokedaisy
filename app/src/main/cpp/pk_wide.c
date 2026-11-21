@@ -1860,6 +1860,9 @@ static void drawPartner(int x0, int y0, int x1, int y1, uint32_t* dst, int strid
 static void drawObjects(const struct Snap* s, int cx, int cy, int x0, int y0, int x1, int y1, uint32_t* dst, int stride, uint32_t alpha);
 static bool frameTaken;   // the frame's own pixels aren't drawn (takenBuf has them): sprites skip them unlooked at
 
+/* LIGHTS (pk_wide_lights): the camera the last field scene was drawn with. */
+static struct { bool ok; int snap, cx, cy, href, vref; } lightCam;
+
 static void drawRegion(const struct Snap* s, int cx, int cy, int href, int vref, int x0, int y0, int x1, int y1,
                        bool skipFrame, uint32_t* dst, int stride, uint32_t alpha) {
     int w = x1 - x0, h = y1 - y0;
@@ -4727,8 +4730,14 @@ static void fullDraw(const struct FullView* f) {
     }
 #endif
     if (valid || battle || menu) {
+        lightCam.ok = valid;
         if (valid) {
             const struct Snap* s = &snaps[bestSnap];
+            lightCam.snap = bestSnap;
+            lightCam.cx = bestCx;
+            lightCam.cy = bestCy;
+            lightCam.href = bestH;
+            lightCam.vref = bestV;
             drawRegion(s, bestCx, bestCy, bestH, bestV, v.x, v.y, v.x + v.w, v.y + v.h, true, &raw[0][0], BUF_W, alpha);
             if (!overlay) markBarRows(v.x, v.y, v.w, v.h);   // FireRed's map preview keeps its dimmed map around it
         } else if (battle) {
@@ -5038,4 +5047,118 @@ static int viewInner(struct mCore* core, const uint32_t* frame, uint32_t* out, s
     if (linesWanted && lineIoFrames < 2) lineIoFrames++;
     prev = cur;
     return mix;
+}
+
+
+/* ---- LIGHTS: where a night's lights go on the last field frame (a frontend's shaders draw them) ---- */
+
+/** A metatile's behavior (MB_*): the attributes' low byte (Emerald's u16), or low 9 bits (FireRed's u32). */
+static int behaviorOf(const struct Snap* s, int mid) {
+    syncSplit(s);
+    uint32_t ts = mid < split ? s->primary : s->secondary;
+    int i = mid < split ? mid : mid - split;
+    if (!ts) return -1;
+    uint32_t attrs = r32(ts + (uint32_t) C[PK_WIDE_ATTR_OFFSET]);
+    if (!attrs) return -1;
+    return C[PK_WIDE_ATTR_SIZE] == 4 ? (int) (r32(attrs + 4 * (uint32_t) i) & 0x1FF) : (int) (r16(attrs + 2 * (uint32_t) i) & 0xFF);
+}
+
+/** A window's glass in a metatile (light blue, as the games paint it): its box within the metatile, or none. Cached per
+ * tileset pair and metatile (a few hundred pixels to look at, once). */
+static struct { uint32_t primary, secondary; int mid; int8_t x0, y0, x1, y1; bool used, glass; } glassCache[128];
+
+static bool glassOf(const struct Snap* s, int mx, int my, int mid, int box[4]) {
+    unsigned h = ((unsigned) mid * 2654435761u ^ s->primary ^ (s->secondary << 7)) & 127;
+    for (unsigned k = 0; k < 4; k++) {
+        unsigned i = (h + k) & 127;
+        if (glassCache[i].used && glassCache[i].mid == mid && glassCache[i].primary == s->primary &&
+            glassCache[i].secondary == s->secondary) {
+            box[0] = glassCache[i].x0; box[1] = glassCache[i].y0; box[2] = glassCache[i].x1; box[3] = glassCache[i].y1;
+            return glassCache[i].glass;
+        }
+    }
+    int count = 0, x0 = 16, y0 = 16, x1 = -1, y1 = -1;
+    for (int y = 0; y < 16; y++)
+        for (int x = 0; x < 16; x++) {
+            int prio = 4, layer = 5;
+            uint16_t c = mapPixel(s, mx * 16 + x, my * 16 + y, 0x0E, &prio, &layer, false);
+            int r = c & 31, g = (c >> 5) & 31, b = (c >> 10) & 31;
+            if (b >= 19 && b >= r + 7 && g >= r + 6 && g <= b + 1 && layer != 5) {   // cyan, not a sign's pale blue or grass
+                count++;
+                if (x < x0) x0 = x;
+                if (y < y0) y0 = y;
+                if (x > x1) x1 = x;
+                if (y > y1) y1 = y;
+            }
+        }
+    bool glass = count >= 8 && count <= 200 && x1 - x0 >= 5;
+    unsigned i = h;
+    for (unsigned k = 0; k < 4; k++)
+        if (!glassCache[(h + k) & 127].used) { i = (h + k) & 127; break; }
+    glassCache[i].used = true;
+    glassCache[i].primary = s->primary;
+    glassCache[i].secondary = s->secondary;
+    glassCache[i].mid = mid;
+    glassCache[i].glass = glass;
+    glassCache[i].x0 = (int8_t) x0; glassCache[i].y0 = (int8_t) y0; glassCache[i].x1 = (int8_t) x1; glassCache[i].y1 = (int8_t) y1;
+    box[0] = x0; box[1] = y0; box[2] = x1; box[3] = y1;
+    return glass;
+}
+
+int pk_wide_lights(int x0, int y0, int x1, int y1, int* out, int max) {
+    if (!lightCam.ok || !hookGba || max <= 0) return 0;
+    G = hookGba;
+    const struct Snap* s = &snaps[lightCam.snap];
+    if (!s->ok) return 0;
+    useLine(PK_WIDE_H / 2);
+    int ox = lightCam.cx + signed9((io(0x14) & 0x1FF) - lightCam.href);
+    int oy = lightCam.cy + signed9((io(0x16) & 0x1FF) - lightCam.vref);
+    // The doors in view (and a little past it, so a light comes in before its door).
+    int doors[32][2], nd = 0;
+    int tx0 = (x0 + ox - 16) >> 4, tx1 = (x1 + ox + 16) >> 4, ty0 = (y0 + oy - 16) >> 4, ty1 = (y1 + oy + 16) >> 4;
+    for (int ty = ty0; ty <= ty1 && nd < 32; ty++)
+        for (int tx = tx0; tx <= tx1 && nd < 32; tx++) {
+            int conn;
+            int mid = blockIn(s, tx, ty, &conn, false);
+            if (conn >= 0) continue;   // a connected map's: its own tilesets
+            int b = behaviorOf(s, mid);
+            if (b == PK_WIDE_MB_ANIMATED_DOOR) {
+                doors[nd][0] = tx;
+                doors[nd][1] = ty;
+                nd++;
+            }
+        }
+    int n = 0;
+    for (int d = 0; d < nd && n < max; d++) {
+        int tx = doors[d][0], ty = doors[d][1];
+        int* o = out + 5 * n++;
+        o[0] = tx * 16 - ox; o[1] = ty * 16 - oy; o[2] = 16; o[3] = 16; o[4] = PK_WIDE_LIGHT_DOOR;
+        // Its building's windows: glass in the rows round the door, a few metatiles either side.
+        for (int wy = ty - 3; wy <= ty && n < max; wy++)
+            for (int wx = tx - 4; wx <= tx + 4 && n < max; wx++) {
+                if (wx == tx && wy == ty) continue;
+                int conn;
+                int mid = blockIn(s, wx, wy, &conn, false);
+                if (conn >= 0) continue;
+                int box[4];
+                if (!glassOf(s, wx, wy, mid, box)) continue;
+                // A window split over two metatiles (or found again by a neighbouring door) is one light.
+                int gx0 = wx * 16 - ox + box[0], gy0 = wy * 16 - oy + box[1];
+                int gx1 = wx * 16 - ox + box[2] + 1, gy1 = wy * 16 - oy + box[3] + 1;
+                bool merged = false;
+                for (int k = 0; k < n && !merged; k++) {
+                    int* w = out + 5 * k;
+                    if (w[4] != PK_WIDE_LIGHT_WINDOW) continue;
+                    if (gx0 > w[0] + w[2] || w[0] > gx1 || gy0 > w[1] + w[3] + 1 || w[1] > gy1 + 1) continue;
+                    int ux0 = gx0 < w[0] ? gx0 : w[0], uy0 = gy0 < w[1] ? gy0 : w[1];
+                    int ux1 = gx1 > w[0] + w[2] ? gx1 : w[0] + w[2], uy1 = gy1 > w[1] + w[3] ? gy1 : w[1] + w[3];
+                    w[0] = ux0; w[1] = uy0; w[2] = ux1 - ux0; w[3] = uy1 - uy0;
+                    merged = true;
+                }
+                if (merged) continue;
+                int* w = out + 5 * n++;
+                w[0] = gx0; w[1] = gy0; w[2] = gx1 - gx0; w[3] = gy1 - gy0; w[4] = PK_WIDE_LIGHT_WINDOW;
+            }
+    }
+    return n;
 }

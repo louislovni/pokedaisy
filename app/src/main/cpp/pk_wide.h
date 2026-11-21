@@ -277,6 +277,14 @@ void pk_wide_bg2_scroll(struct mCore* core, int* h, int* v);
 void pk_ride_show(struct mCore* core, int on);
 void pk_ride_info(char* out, int n);
 
+/** LIGHTS: the night's lights on the last field frame drawn - each door, and the glass of its building's windows - in
+ * the GBA screen's pixels (x, y, w, h, kind: PK_WIDE_LIGHT_*), those within [x0, x1) x [y0, y1) and a metatile past;
+ * returns how many (max). 0 off the field. A frontend's shaders draw the light (Capsule's iPhone). Emu thread. */
+#define PK_WIDE_LIGHT_DOOR 0
+#define PK_WIDE_LIGHT_WINDOW 1
+#define PK_WIDE_MB_ANIMATED_DOOR 0x69   /* MB_ANIMATED_DOOR (Emerald's and FireRed's) */
+int pk_wide_lights(int x0, int y0, int x1, int y1, int* out, int max);
+
 /** A game closed: FOLLOWER (its sprite, shown or not) and DAY AND NIGHT's tint go back to none, so the next game starts
  * without the last one's (they live here, not in the core, and the next game's engine starts from none). */
 void pk_wide_extras_reset(void);
