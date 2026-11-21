@@ -76,7 +76,9 @@ object HeartfeltGold {
     fun matches(read: (Long, Int) -> ByteArray?): Boolean {
         val h = read(0, 0x60)?.takeIf { it.size == 0x60 } ?: return false
         if (asciiString(h, 0x0C, 4) != CODE || (h[0x1E].toInt() and 0xFF) != REV) return false
-        return u32le(h, SIG_OFFSET.toInt()) == SIG && u32le(h, 0x54) == OVERLAY_TABLE_SIZE.toLong()
+        // Chaos Purple ([ChaosPurple], 149 overlays) is the same engine over the same cart and reads as this one.
+        return u32le(h, SIG_OFFSET.toInt()) == SIG &&
+            u32le(h, 0x54).let { it == OVERLAY_TABLE_SIZE.toLong() || it == ChaosPurple.OVERLAY_TABLE_SIZE.toLong() }
     }
 
     /** [matches] on a plain ROM file. */

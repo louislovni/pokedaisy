@@ -154,6 +154,10 @@ class SiteDataExportTest {
                     "    {\"code\": ${q(RenegadePlatinum.CODE)}, \"rev\": ${RenegadePlatinum.REV}, \"offset\": ${RenegadePlatinum.SIG_OFFSET}, " +
                     "\"word\": ${RenegadePlatinum.SIG}, \"title\": ${q(GameTitles.BY_SHA1.getValue(RenegadePlatinum.V1_3_0_SHA1))}, " +
                     "\"version\": \"v1.3.0\"},\n" +
+                    // Chaos Purple (ChaosPurple): Heartfelt's ARM9 size too, so its overlay table's size first.
+                    "    {\"code\": ${q(HeartfeltGold.CODE)}, \"rev\": ${HeartfeltGold.REV}, \"offset\": 84, " +
+                    "\"word\": ${com.pokedaisy.app.companion.data.ChaosPurple.OVERLAY_TABLE_SIZE}, \"title\": ${q(com.pokedaisy.app.companion.data.ChaosPurple.TITLE)}, " +
+                    "\"version\": \"demo\"},\n" +
                     // Heartfelt Gold (HeartfeltGold): the US HeartGold's header, its ARM9 size.
                     "    {\"code\": ${q(HeartfeltGold.CODE)}, \"rev\": ${HeartfeltGold.REV}, \"offset\": ${HeartfeltGold.SIG_OFFSET}, " +
                     "\"word\": ${HeartfeltGold.SIG}, \"title\": ${q(GameTitles.BY_SHA1.getValue(HeartfeltGold.V1_0_15_SHA1))}, " +

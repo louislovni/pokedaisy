@@ -3470,6 +3470,16 @@ isn't in the personal records. Its map headers are retail's table (0x020F6BE0, 5
 give WILD ENCOUNTERS its rates (`HeartfeltGold.Data.wildRates`). EXPAND, FLY, the battle buttons and WILD ENCOUNTERS ran
 headless as HeartGold's (docs/ROM_FEATURES.md note 37). No GUIDE.
 
+**Chaos Purple** (the demo with its Silph Co. fix, SHA-1 `330d9eb5…`; 2026-11-21): another hg-engine build over the US
+HeartGold, read as Heartfelt Gold (`HeartfeltGold.matches` takes its 149-overlay table too; `ChaosPurple.matches` tells the
+two apart). Checked headless on the player's save: the US RAM, its SaveData's section table equal to Heartfelt's to the byte
+(bag 0x644 + 0x990, place 0x1424, Pokédex 0x14A8 with the seen bits at +0x400), so `GEN4_HEARTFELT_GOLD` reads it; species ids
+as Heartfelt's (VICTINI 544 .. PECHARUNT 1075), 1393 personal records. Where its data differs (`NdsArt`, `chaos`): the type
+chart sits in overlay 130's file (cart 0x3F2889); the icons' palettes are the first 1393 bytes of overlay 129 (its
+GetMonIconPalette at 0x023D9950 reads 0x023D8000 + species); the level-up moves are a `/a/0/3/3` member a species. The art's
+stamp carries " chaos", so switching between the two rebuilds it. EXPAND, FLY, PC, WILD and the battle buttons weren't run in
+it yet (docs/ROM_FEATURES.md note 41). No GUIDE.
+
 **Renegade Platinum** (Drayano's v1.3.0, SHA-1 `d4ee068b7e0a19a848436369f145e3154afe13ca`): US Platinum rev 1 edited in
 place, header and all (`CPUE` rev 1), so everything that goes by the header (the Poller's `detectDs`,
 `pk_nds_field.cpp`, `pk_nds_call.cpp`, EXPAND, STEADY) runs it as Platinum, and it should: its RAM, save layout and ARM9

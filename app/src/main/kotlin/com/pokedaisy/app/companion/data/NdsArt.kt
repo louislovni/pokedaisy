@@ -207,7 +207,9 @@ object NdsArt {
         // and stats are theirs, so the marker keeps a CRC of those too.
         // Heartfelt Gold's art built before its DEX and its icons' own palettes is built again (" dex").
         val stamp = "v$VERSION $code $rev" + (if (redux) " " + (file(f, header, "/a/0/1/6")?.let { crc32(it) } ?: 0L) else "") +
-            (if (heartfelt) " dex" else "")
+            (if (heartfelt) " dex" else "") +
+            // Chaos Purple shares Heartfelt's header and its art's paths: its own stamp rebuilds them between the two.
+            (if (heartfelt && ChaosPurple.matches { off, len -> f.read(off, len) }) " chaos" else "")
         if (marker.isFile && runCatching { marker.readText() }.getOrNull() == stamp) return false
         if (origin) {
             if (!extractOrigin(f, header, dir)) return false
@@ -304,7 +306,9 @@ object NdsArt {
     private fun extractHeartfelt(f: FileHandle, header: ByteArray, dir: Path): Boolean {
         val narc = Narc(file(f, header, "/a/0/2/0") ?: return false)
         val palettes = palettes(narc.member(0))
-        val iconPalettes = file(f, header, HeartfeltGold.ICON_PALETTE_FILE)?.let { Narc(it).member(HeartfeltGold.ICON_PALETTE_MEMBER) }
+        val chaos = ChaosPurple.matches { off, len -> f.read(off, len) }
+        val iconPalettes = (if (chaos) overlay(f, header, ChaosPurple.ICON_PALETTE_OVERLAY)?.copyOf(ChaosPurple.LAST_SPECIES + 1)
+            else file(f, header, HeartfeltGold.ICON_PALETTE_FILE)?.let { Narc(it).member(HeartfeltGold.ICON_PALETTE_MEMBER) })
             ?: return false
         for (species in 1..minOf(HeartfeltGold.LAST_SPECIES, iconPalettes.size - 1)) {
             val pal = palettes.getOrNull(u8(iconPalettes, species)) ?: continue
@@ -320,7 +324,7 @@ object NdsArt {
         }
         file(f, header, "/a/1/4/4")?.let { pokegear(Narc(it), dir) }
         file(f, header, "/a/0/1/5")?.let { bagPockets(Narc(it), dir) }
-        dexHeartfelt(f, header, dir)
+        dexHeartfelt(f, header, dir, chaos)
         return true
     }
 
@@ -333,7 +337,7 @@ object NdsArt {
      * pairs a species, 0xFFFF-ended; an evolution's target carries a form in its top bits (one to a form is left out);
      * Johto's numbers are retail's (`/a/1/3/8`). The pictures are HeartGold's `/a/0/0/4`, six files a species, grown.
      */
-    private fun dexHeartfelt(f: FileHandle, header: ByteArray, dir: Path) {
+    private fun dexHeartfelt(f: FileHandle, header: ByteArray, dir: Path, chaos: Boolean = false) {
         val msg = Narc(file(f, header, "/a/0/2/7") ?: return)
         val text = msg.member(803)?.let { Gen4Text.lines(it) } ?: return
         val category = msg.member(816)?.let { Gen4Text.lines(it) } ?: return
@@ -342,7 +346,9 @@ object NdsArt {
         val heights = msg.member(814)?.let { Gen4Text.lines(it) } ?: emptyList()
         val personal = Narc(file(f, header, "/a/0/0/2") ?: return)
         val johto = Narc(file(f, header, "/a/1/3/8") ?: return).member(0) ?: return
-        val learnsets = Narc(file(f, header, "/a/0/3/3") ?: return).member(0) ?: return
+        // Chaos Purple ([ChaosPurple]): a member a species, the same pairs.
+        val learnsetNarc = Narc(file(f, header, "/a/0/3/3") ?: return)
+        val learnsets = (if (chaos) ByteArray(0) else learnsetNarc.member(0)) ?: return
         val evolutions = Narc(file(f, header, "/a/0/3/4") ?: return)
         val species = (1..HeartfeltGold.LAST_NATIONAL).map(HeartfeltGold::speciesOf)
         val sb = StringBuilder()
@@ -353,7 +359,10 @@ object NdsArt {
             fun ability(o: Int) = u16(p, o).let { if (it != 0) abilities.getOrElse(it) { "" } else "" }
             val inches = HEIGHT_TEXT.find(heights.getOrElse(sp) { "" })?.let { m -> m.groupValues[1].toInt() * 12 + m.groupValues[2].toInt() }
             val lbs10 = WEIGHT_TEXT.find(weights.getOrElse(sp) { "" })?.let { m -> m.groupValues[1].toInt() * 10 + m.groupValues[2].toInt() }
-            val levelUp = (0 until 41).asSequence().map { sp * 164 + it * 4 }.takeWhile { it + 4 <= learnsets.size }
+            val levelUp = if (chaos) learnsetNarc.member(sp)?.let { m ->
+                (0 until m.size / 4).asSequence().map { it * 4 }.map { u16(m, it) to u16(m, it + 2) }.takeWhile { it.first != 0xFFFF }.toList()
+            } ?: emptyList()
+            else (0 until 41).asSequence().map { sp * 164 + it * 4 }.takeWhile { it + 4 <= learnsets.size }
                 .map { u16(learnsets, it) to u16(learnsets, it + 2) }.takeWhile { it.first != 0xFFFF }.toList()
             val cells = listOf(
                 sp.toString(),
@@ -426,7 +435,8 @@ object NdsArt {
             categories[id] = u8(m, 2)
         }
         val chart = HashMap<Int, Int>()
-        val c = f.read(HeartfeltGold.TYPE_CHART_OFFSET, 0x400)
+        val c = f.read(if (ChaosPurple.matches { off, len -> f.read(off, len) }) ChaosPurple.TYPE_CHART_OFFSET
+            else HeartfeltGold.TYPE_CHART_OFFSET, 0x400)
         var i = 0
         while (i + 3 <= c.size && u8(c, i) != 0xFF) {
             val atk = u8(c, i)

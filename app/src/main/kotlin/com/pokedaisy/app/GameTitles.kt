@@ -44,7 +44,7 @@ object GameTitles {
         com.pokedaisy.app.companion.data.OriginHeartGold.V4_0_3_EN_RC8_SHA1,
         com.pokedaisy.app.companion.data.RenegadePlatinum.V1_3_0_SHA1,
         com.pokedaisy.app.companion.data.RenegadePlatinum.V1_2_0_SHA1,
-    ) + com.pokedaisy.app.companion.data.RenegadePlatinum.V1_3_0_PATCH_SHA1S + com.pokedaisy.app.companion.data.HeartfeltGold.SHA1S + com.pokedaisy.app.companion.data.Black2Redux.BLAZE_BLACK2_SHA1S + com.pokedaisy.app.companion.data.Black2Redux.VOLT_WHITE2_SHA1S +
+    ) + com.pokedaisy.app.companion.data.RenegadePlatinum.V1_3_0_PATCH_SHA1S + com.pokedaisy.app.companion.data.HeartfeltGold.SHA1S + com.pokedaisy.app.companion.data.ChaosPurple.SHA1S + com.pokedaisy.app.companion.data.Black2Redux.BLAZE_BLACK2_SHA1S + com.pokedaisy.app.companion.data.Black2Redux.VOLT_WHITE2_SHA1S +
         com.pokedaisy.app.companion.data.NDS_PORTS.map { it.sha1 }
 
     private val RETAIL: Map<String, String> = mapOf(
@@ -74,6 +74,8 @@ object GameTitles {
     ) + com.pokedaisy.app.companion.data.RenegadePlatinum.V1_3_0_PATCH_SHA1S.associateWith { "Pokémon Renegade Platinum" } +
         // Heartfelt Gold v1.0.15 (and its Zoomed In patch): hg-engine over the US HeartGold (HeartfeltGold).
         com.pokedaisy.app.companion.data.HeartfeltGold.SHA1S.associateWith { "Pokémon Heartfelt Gold" } +
+        // Chaos Purple's demo (its Silph Co. fix): hg-engine over the US HeartGold, read as Heartfelt Gold (ChaosPurple).
+        com.pokedaisy.app.companion.data.ChaosPurple.SHA1S.associateWith { com.pokedaisy.app.companion.data.ChaosPurple.TITLE } +
         // Blaze Black 2 / Volt White 2 Redux v1.4.1 (and their Classic / EVless patches), Black 2 / White 2 edited in place (Black2Redux).
         com.pokedaisy.app.companion.data.Black2Redux.BLAZE_BLACK2_SHA1S.associateWith { "Pokémon Blaze Black 2 Redux" } +
         com.pokedaisy.app.companion.data.Black2Redux.VOLT_WHITE2_SHA1S.associateWith { "Pokémon Volt White 2 Redux" } + mapOf(
