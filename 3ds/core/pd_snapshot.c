@@ -580,6 +580,7 @@ void pd_snapshot_read(struct pd_snapshot* s, const struct pd_game* g, pd_read_fn
 
     bool saveOk = haveKey && in_ram(sb1);
     s->gender = -1;
+    s->weather = s->flashLevel = -1;
     if (saveOk) read_save_fields(s, g, read, ctx, sb1, sb2);
 
     // --- the map: gMapHeader's layout size and type ---
@@ -659,6 +660,13 @@ static void read_save_fields(struct pd_snapshot* s, const struct pd_game* g, pd_
     }
     uint8_t gender = 0xFF;
     if (read(ctx, sb2 + SAVEBLOCK2_GENDER_OFF, &gender, 1)) s->gender = gender <= 1 ? gender : -1;
+    // SaveBlock1's weather / flashLevel (0x2E / 0x30: after the five warps and savedMusic, in every Gen 3 engine).
+    uint8_t sky[3];
+    s->weather = s->flashLevel = -1;
+    if (read(ctx, sb1 + 0x2E, sky, sizeof sky)) {
+        s->weather = sky[0] < 32 ? sky[0] : -1;
+        s->flashLevel = sky[2] <= 8 ? sky[2] : -1;
+    }
 
     // The seen / caught bit arrays (the app's readPokedexState): where there are anti-cheat copies of
     // seen, a bit only counts if every copy agrees, and caught needs seen too. Kept by national number.

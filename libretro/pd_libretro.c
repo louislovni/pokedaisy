@@ -2493,3 +2493,23 @@ RETRO_API void retro_pd_dock_touch(int x, int y, int down) {
 
 /* The companion's language ("fr"; NULL / "en" = English): its words, menus and the guide's text (pd_tr). */
 RETRO_API void retro_pd_language(const char *code) { pd_tr_set_language(code); }
+
+/* What a frontend's weather and light effects follow (Capsule's iPhone shaders), after the frame: out[0] the map's
+ * weather (WEATHER_*, -1 unknown), [1] gMapHeader's map type (-1), [2] in a battle, [3] the free field shown (no menu,
+ * battle, fade or text box), [4] the cave's flash level (0 lit, -1 unknown), [5..7] DAY AND NIGHT's tint now (r, g, b,
+ * 256 = none). Returns how many it wrote (up to n). */
+RETRO_API int retro_pd_scene(int *out, int n) {
+  int v[8];
+  v[0] = snap.valid ? snap.weather : -1;
+  v[1] = snap.valid && snap.posOk ? snap.mapType : -1;
+  v[2] = (snap.valid && snap.inBattle) || (fieldFlags & PK_FIELD_BATTLE);
+  v[3] = haveGame && !COMPANION_OVER && !quickOpen && !v[2] && (!wideSupported || pk_wide_scene() == PK_WIDE_SCENE_FIELD);
+  v[4] = snap.valid ? snap.flashLevel : -1;
+  v[5] = dayTint[0];
+  v[6] = dayTint[1];
+  v[7] = dayTint[2];
+  int k = n < 8 ? n : 8;
+  for (int i = 0; i < k; i++)
+    out[i] = v[i];
+  return k;
+}

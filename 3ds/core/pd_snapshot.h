@@ -125,6 +125,9 @@ struct pd_snapshot {
     int x, y, mapGroup, mapNum;
     int mapW, mapH, mapType;
     int gender; // SaveBlock2.playerGender: 0 boy, 1 girl, -1 unknown
+    // SaveBlock1.weather (the map's WEATHER_*, or a script's) and flashLevel (a dark cave: 0 lit, more = darker), -1
+    // unknown: a frontend's weather and light effects.
+    int weather, flashLevel;
 
     // POKéDEX: by national number - 1, a bit each (the app's
     // readPokedexState: seen only when SaveBlock2's flags and both of
