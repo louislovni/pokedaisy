@@ -1824,6 +1824,15 @@ its first frame.
   water, tall grass over his feet, and NPC depth order north of the partner (he takes the player's priority only, so a person
   standing behind him can draw wrongly over him). The co-op transport and its manual page are a separate piece of work.
 
+**In the libretro core** (`libretro/pd_coop.inc`, 2026-11-21, for Capsule's iPhone / PC frontends): the same presence over
+`retro_pd_coop_frame(now, out)` (after each `retro_run`: an update to send, the app's 20-byte `PresenceCodec` format),
+`retro_pd_coop_receive`, `retro_pd_coop_stop` and `retro_pd_coop_available` (Emerald in any Western language: BPEE / BPEF /
+BPED / BPEI / BPES, whose maps and field RAM are the same). The smoother is `PresenceSmoother`'s, line for line; the partner
+is always drawn as their own Brendan / May (the look id is sent as 0 and not read), from this ROM's own bytes found by a
+16-byte probe and the blob's CRC (`PlayerLookSigsGen`'s, the same in every language; the surf blob's is
+`CoopEmeraldGen.SURF_BLOB_CRC`). Checked with two cores on French Emerald, one replaying the other's updates: the partner
+stood where the other player had walked. The frontend owns the connection (the app's transport and pairing).
+
 ### DAY AND NIGHT (the overworld by the clock)
 
 MAKEOVER > DAY AND NIGHT (`DayNight.kt`, `Prefs.dayNight`, off) tints the map by the device's clock: keyframes by hour

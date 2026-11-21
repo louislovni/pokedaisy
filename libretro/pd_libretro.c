@@ -697,6 +697,9 @@ static bool polished_potion(int item) {
 
 static void snapshot(void) { pd_snapshot_read(&snap, &game, pd_lr_read_memory, core); }
 
+/* Co-op presence: the frontend's retro_pd_coop_* (Capsule on iPhone / PC). */
+#include "pd_coop.inc"
+
 /* pk_flight told the profile's words with FLY ON's vehicle (again only when it changed). */
 static void flight_configure_words(void) {
   if (!flightWords)
@@ -1236,6 +1239,9 @@ RETRO_API bool retro_load_game(const struct retro_game_info *g) {
   quickOpen = flyList = repelList = false; // before the canvas: an open menu doubles it (canvas_update)
   canvas_update(false);
   fieldKnown = PD_BE_IS_GBA() && pk_field_configure(crc);
+#ifndef PD_ARMGBA
+  coop_game_changed();
+#endif
   wildSwitch = fieldKnown ? pk_wild_switch_find(rom, len) : 0;
   if (wildSwitch)
     pk_field_wild(wildSwitch, settings.wildOff);
@@ -1372,6 +1378,9 @@ RETRO_API void retro_reset(void) {
 }
 
 RETRO_API void retro_unload_game(void) {
+#ifndef PD_ARMGBA
+  coop_game_changed();
+#endif
   pk_flight_configure(NULL, 0);
   pd_flight_area_end();
   pk_flight_set_area(NULL, 0);
