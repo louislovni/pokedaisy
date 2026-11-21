@@ -5065,14 +5065,15 @@ static int behaviorOf(const struct Snap* s, int mid) {
 
 /** A window's glass in a metatile (light blue, as the games paint it): its box within the metatile, or none. Cached per
  * tileset pair and metatile (a few hundred pixels to look at, once). */
-static struct { uint32_t primary, secondary; int mid; int8_t x0, y0, x1, y1; bool used, glass; } glassCache[128];
+static struct { uint32_t primary, secondary, at; int mid; int8_t x0, y0, x1, y1; bool used, glass; } glassCache[128];
+static uint32_t lightCalls;   // pk_wide_lights' calls: a "no glass" is looked at again a second on (a fade hid it)
 
 static bool glassOf(const struct Snap* s, int mx, int my, int mid, int box[4]) {
     unsigned h = ((unsigned) mid * 2654435761u ^ s->primary ^ (s->secondary << 7)) & 127;
     for (unsigned k = 0; k < 4; k++) {
         unsigned i = (h + k) & 127;
         if (glassCache[i].used && glassCache[i].mid == mid && glassCache[i].primary == s->primary &&
-            glassCache[i].secondary == s->secondary) {
+            glassCache[i].secondary == s->secondary && (glassCache[i].glass || lightCalls - glassCache[i].at < 60)) {
             box[0] = glassCache[i].x0; box[1] = glassCache[i].y0; box[2] = glassCache[i].x1; box[3] = glassCache[i].y1;
             return glassCache[i].glass;
         }
@@ -5093,8 +5094,13 @@ static bool glassOf(const struct Snap* s, int mx, int my, int mid, int box[4]) {
         }
     bool glass = count >= 8 && count <= 200 && x1 - x0 >= 5;
     unsigned i = h;
-    for (unsigned k = 0; k < 4; k++)
-        if (!glassCache[(h + k) & 127].used) { i = (h + k) & 127; break; }
+    for (unsigned k = 0; k < 4; k++) {
+        unsigned j = (h + k) & 127;
+        bool same = glassCache[j].used && glassCache[j].mid == mid && glassCache[j].primary == s->primary &&
+                    glassCache[j].secondary == s->secondary;
+        if (!glassCache[j].used || same) { i = j; break; }
+    }
+    glassCache[i].at = lightCalls;
     glassCache[i].used = true;
     glassCache[i].primary = s->primary;
     glassCache[i].secondary = s->secondary;
@@ -5106,6 +5112,7 @@ static bool glassOf(const struct Snap* s, int mx, int my, int mid, int box[4]) {
 }
 
 int pk_wide_lights(int x0, int y0, int x1, int y1, int* out, int max) {
+    lightCalls++;
     if (!lightCam.ok || !hookGba || max <= 0) return 0;
     G = hookGba;
     const struct Snap* s = &snaps[lightCam.snap];
