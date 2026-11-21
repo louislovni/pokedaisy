@@ -617,6 +617,17 @@ static struct pd_host_info host;
 static char settingsPath[1100];
 static char pdDir[1050]; // <save dir>/pokedaisy: settings.ini and FLIGHT AREA's seen maps ("" = none)
 static bool companion, companionWas, haveGame;
+
+/* Capsule's DOCK: the companion drawn in a panel of the frontend's own (its iPhone app's, over the controls) while the
+ * game keeps running and showing above it. Off (0) by default: the companion then covers the game as upstream. */
+static int dockW, dockH;
+static uint32_t *dockPx;
+static struct pd_canvas dockCanvas;
+static unsigned dockSerial;
+static bool dockTouchDown, dockTouchWas, dockTouchSeen, dockTouchUp;
+static int dockTX, dockTY;
+#define DOCKED (dockW > 0)
+#define COMPANION_OVER (companion && !DOCKED) /* the companion in the game's canvas */
 static int frames;
 
 /* the HUD over the overworld (B2) */
@@ -1060,7 +1071,7 @@ static void choose_canvas(void) {
 
 /* Keep GBA Quick Menu on the selected gameplay canvas. Companion has its own layout. */
 static int want_canvas(void) {
-  if (companion || (quickOpen && !PD_BE_IS_GBA()))
+  if (COMPANION_OVER || (quickOpen && !PD_BE_IS_GBA()))
     return CANVAS_MENU;
   if (settings.aspect == PD_ASPECT_ORIGINAL)
     return PD_BE_IS_GBA() ? CANVAS_EXPAND : CANVAS_ZOOM;
@@ -1074,7 +1085,7 @@ static void canvas_update(bool notify) {
   int w = menuW, h = menuH, scale = 1;
   unsigned fw = gameW ? gameW : (unsigned)baseGW, fh = gameH ? gameH : (unsigned)baseGH;
   // Capsule: a game EXPAND can't rebuild (no wide support) gets its own picture too, not a small one in a big canvas.
-  if (!companion && fw && fh &&
+  if (!COMPANION_OVER && fw && fh &&
       (PD_BE_IS_GBA() ? settings.aspect == PD_ASPECT_ORIGINAL || !wideSupported : panelW && !wideSupported)) {
     w = (int)fw;
     h = (int)fh;
@@ -1083,7 +1094,7 @@ static void canvas_update(bool notify) {
   // While the Quick Menu is open, double the game pixels exactly so menu text and icons
   // draw at output resolution. Gameplay stays at 1x: a doubled canvas costs every frame
   // four times the pixels (Brick: 4.5 -> 7.1 ms per shown frame).
-  if (PD_BE_IS_GBA() && !companion && quickOpen && (w < 320 || h < 240) && w <= CWMAX / 2 && h <= CHMAX / 2) {
+  if (PD_BE_IS_GBA() && !COMPANION_OVER && quickOpen && (w < 320 || h < 240) && w <= CWMAX / 2 && h <= CHMAX / 2) {
     scale = 2;
     w *= scale;
     h *= scale;
@@ -1507,6 +1518,48 @@ static void hud_field_tick(void) {
   hudFieldFrames = field ? hudFieldFrames + 1 : 0;
 }
 
+/* The companion, drawn into `canvas` (the game's, or the dock's swapped in). */
+static void companion_draw(void) {
+    pd_ui_update(&ui, &snap);
+    ui.focusId = focusId;
+    host.ffOn = false;
+    host.hasState = false;
+    host.flightReady = freeFlight && fly_flyer(&snap) >= 0; // MAP's TAKE OFF / LAND
+    host.flying = freeFlight && pk_flight_state() != PK_FLIGHT_IDLE;
+    memset(canvas.px, 0, (size_t)canvas.w * canvas.h * sizeof *canvas.px);
+    // Use the Dex's compact font throughout the GBC Companion. Restore the cart font for the in-game HUD.
+    const bool gen2 = game.cfg && game.cfg->gb && game.cfg->gb->gen == 2;
+    const struct pd_glyph *glyphs = NULL;
+    int glyphCount = 0;
+    if (gen2) {
+      pd_font_get(&glyphs, &glyphCount);
+      pd_font_set(NULL, 0);
+    }
+    pd_ui_draw(&ui, &canvas, &game, &snap, &host);
+    if (gen2)
+      pd_font_set(glyphs, glyphCount);
+    map_cursor_sync(&ui, &game, &snap);
+    if (ui.tab != PD_TAB_GUIDE || (ui.overlay != PD_OVERLAY_NONE && ui.overlay != PD_OVERLAY_GUIDE_NOTICE)) {
+      const int focus = focus_after_draw(&ui, focus_resolve(&ui));
+      if (ui.overlay != PD_OVERLAY_NONE ||
+          (ui.tab != PD_TAB_SETTINGS && (ui.tab != PD_TAB_PARTY || ui.summarySlot < 0) &&
+           !(ui.tab == PD_TAB_BAG && ui.bagTabs)))
+        focus_draw(&ui, focus);
+    }
+}
+
+/* Docked: the companion into the dock's canvas, the game's left as drawn. */
+static void dock_draw(void) {
+  if (!dockPx)
+    return;
+  const struct pd_canvas gameCanvas = canvas;
+  canvas = dockCanvas;
+  companion_draw();
+  dockCanvas = canvas;
+  canvas = gameCanvas;
+  dockSerial++;
+}
+
 RETRO_API void retro_run(void) {
   if (!haveGame) {
     mgba_retro_run();
@@ -1788,8 +1841,18 @@ RETRO_API void retro_run(void) {
   if (companion) {
     if (ui.tab != PD_TAB_BAG || ui.overlay != PD_OVERLAY_NONE)
       ui.bagTabs = false; // the pocket tab bar's cursor lives only on the bag
-    // The finger over the companion, as the 3DS's stylus: down every frame it's held (drags scroll), then up.
-    if (touchDown)
+    // The finger over the companion, as the 3DS's stylus: down every frame it's held (drags scroll), then up. Docked,
+    // the frontend's panel says where (retro_pd_dock_touch).
+    if (DOCKED) {
+      if (dockTouchDown)
+        pd_ui_touch(&ui, dockTX, dockTY, true);
+      else if (dockTouchWas)
+        pd_ui_touch(&ui, 0, 0, false);
+      dockTouchWas = dockTouchDown;
+      dockTouchSeen = true;
+      if (dockTouchUp) // lifted before a frame saw it down: up on this next frame, so the tap counts
+        dockTouchDown = dockTouchUp = false;
+    } else if (touchDown)
       pd_ui_touch(&ui, touchX, touchY, true);
     else if (touchWas)
       pd_ui_touch(&ui, 0, 0, false);
@@ -1973,11 +2036,11 @@ RETRO_API void retro_run(void) {
   }
   if (polishedActions && companion && pd_binput_busy(&polishedInput))
     companion = false; // The native battle / Bag / party resumes with the selected action.
-  bool paused = companion || hudFocus || (quickOpen && !flyAsk);
+  bool paused = COMPANION_OVER || hudFocus || (quickOpen && !flyAsk);
   const bool expanded = wideSupported && settings.aspect != PD_ASPECT_ORIGINAL;
   const bool repeat = late && canDupe && haveGameFrame && !paused && !quickOpen &&
                       (!ff || (expanded && !repeatedFrame));
-  maskGame = paused;
+  maskGame = paused || companion; // docked, the game runs on but the keys are the companion's
   shortcutExclusive = false;
   if (!paused) {
     if (polishedActions && !rewinding && settings.wildOff &&
@@ -2043,7 +2106,7 @@ RETRO_API void retro_run(void) {
     PD_BE_AUDIO(silence, 549);
   }
 
-  if (!snap.valid || (companion && !wasCompanion) || (!companion && frames % 30 == 0))
+  if (!snap.valid || (companion && !wasCompanion) || ((!companion || DOCKED) && frames % 30 == 0))
     snapshot();
   companionWas = companion;
   frames++;
@@ -2218,7 +2281,7 @@ RETRO_API void retro_run(void) {
   int av = 3;
   const bool hidden = realEnv && realEnv(RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE, &av) && !(av & 1);
   if (hidden && canDupe && haveGameFrame) {
-    if (!companion && !(quickOpen && ovPixels))
+    if (!COMPANION_OVER && !(quickOpen && ovPixels))
       hud_field_tick(); // as the game's own draw below would
     if (messageFrames > 0)
       messageFrames--; // as present() would: a notice lasts as many game frames hidden or shown
@@ -2228,33 +2291,8 @@ RETRO_API void retro_run(void) {
     return;
   }
   PF_T(td0);
-  if (companion) {
-    pd_ui_update(&ui, &snap);
-    ui.focusId = focusId;
-    host.ffOn = false;
-    host.hasState = false;
-    host.flightReady = freeFlight && fly_flyer(&snap) >= 0; // MAP's TAKE OFF / LAND
-    host.flying = freeFlight && pk_flight_state() != PK_FLIGHT_IDLE;
-    memset(cvs, 0, (size_t)CW * CH * sizeof *cvs);
-    // Use the Dex's compact font throughout the GBC Companion. Restore the cart font for the in-game HUD.
-    const bool gen2 = game.cfg && game.cfg->gb && game.cfg->gb->gen == 2;
-    const struct pd_glyph *glyphs = NULL;
-    int glyphCount = 0;
-    if (gen2) {
-      pd_font_get(&glyphs, &glyphCount);
-      pd_font_set(NULL, 0);
-    }
-    pd_ui_draw(&ui, &canvas, &game, &snap, &host);
-    if (gen2)
-      pd_font_set(glyphs, glyphCount);
-    map_cursor_sync(&ui, &game, &snap);
-    if (ui.tab != PD_TAB_GUIDE || (ui.overlay != PD_OVERLAY_NONE && ui.overlay != PD_OVERLAY_GUIDE_NOTICE)) {
-      const int focus = focus_after_draw(&ui, focus_resolve(&ui));
-      if (ui.overlay != PD_OVERLAY_NONE ||
-          (ui.tab != PD_TAB_SETTINGS && (ui.tab != PD_TAB_PARTY || ui.summarySlot < 0) &&
-           !(ui.tab == PD_TAB_BAG && ui.bagTabs)))
-        focus_draw(&ui, focus);
-    }
+  if (COMPANION_OVER) {
+    companion_draw();
   } else if (quickOpen && ovPixels) {
     if (polishedActions && wideReady && settings.aspect != PD_ASPECT_ORIGINAL)
       draw_wide_quick_background();
@@ -2298,10 +2336,12 @@ RETRO_API void retro_run(void) {
     } else
       hudShown = false;
   }
+  if (companion && DOCKED)
+    dock_draw();
   PF_T(td1);
   pf_add(PF_DRAW, td1 - td0);
   present();
-  haveGameFrame = !companion && !quickOpen && !hudFocus;
+  haveGameFrame = !COMPANION_OVER && !quickOpen && !hudFocus;
   PF_T(td2);
   pf_add(PF_PRESENT, td2 - td1);
   pf_add(PF_TOTAL, td2 - t0);
@@ -2309,4 +2349,72 @@ RETRO_API void retro_run(void) {
   pf_hist(td2 - t0);
 #endif
   pf_frame();
+}
+
+/* ---- Capsule's dock (see DOCKED) ---- */
+
+/* The dock's canvas, in companion pixels (at least 320 x 240, at most 640 x MENU_MAX_H); 0 x 0 = no dock. */
+RETRO_API void retro_pd_dock(int w, int h) {
+  if (w <= 0 || h <= 0) {
+    if (companion && DOCKED)
+      companion = false;
+    dockW = dockH = 0;
+    free(dockPx);
+    dockPx = NULL;
+    return;
+  }
+  w = w < 320 ? 320 : w > 640 ? 640 : w;
+  h = h < 240 ? 240 : h > MENU_MAX_H ? MENU_MAX_H : h;
+  if (w != dockW || h != dockH || !dockPx) {
+    uint32_t *px = calloc((size_t)w * h, sizeof *px);
+    if (!px)
+      return;
+    free(dockPx);
+    dockPx = px;
+    dockW = w;
+    dockH = h;
+    pd_canvas_init(&dockCanvas, w, h, dockPx);
+  }
+}
+
+/* Opens (1) or closes (0) the companion in the dock. */
+RETRO_API void retro_pd_dock_open(int open) {
+  if (!haveGame || !DOCKED)
+    return;
+  companion = open != 0;
+  if (companion) {
+    quickOpen = flyList = repelList = false;
+    flyAsk = 0;
+    hudFocus = false;
+    hudState.focus = -1;
+  }
+  dockTouchDown = dockTouchUp = false;
+}
+
+/* Whether the companion is open: it closes itself (B on its first page, an action that needs the field), and opens from
+ * the HUD or the quick menu. */
+RETRO_API int retro_pd_dock_is_open(void) { return companion && DOCKED; }
+
+/* The dock's pixels (0xRRGGBB), its size and a count that moves each time they're drawn; NULL with no dock. */
+RETRO_API const uint32_t *retro_pd_dock_pixels(int *w, int *h, unsigned *serial) {
+  if (w)
+    *w = dockW;
+  if (h)
+    *h = dockH;
+  if (serial)
+    *serial = dockSerial;
+  return dockPx;
+}
+
+/* The finger on the dock, in its pixels: down while held. */
+RETRO_API void retro_pd_dock_touch(int x, int y, int down) {
+  dockTX = x < 0 ? 0 : x >= dockW ? dockW - 1 : x;
+  dockTY = y < 0 ? 0 : y >= dockH ? dockH - 1 : y;
+  if (down) {
+    dockTouchDown = true;
+    dockTouchSeen = dockTouchUp = false;
+  } else if (dockTouchDown && !dockTouchSeen)
+    dockTouchUp = true; // a tap quicker than a frame: kept down until one has seen it
+  else
+    dockTouchDown = false;
 }
