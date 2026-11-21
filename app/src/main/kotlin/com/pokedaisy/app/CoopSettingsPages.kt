@@ -30,7 +30,7 @@ import com.pokedaisy.app.companion.coop.CoopPairing
 import com.pokedaisy.app.companion.coop.CoopRelay
 import com.pokedaisy.app.companion.coop.CoopSaveId
 import com.pokedaisy.app.companion.coop.CoopSession
-import com.pokedaisy.app.companion.coop.EMERALD_COOP_SHA1
+import com.pokedaisy.app.companion.coop.isCoopEmerald
 import com.pokedaisy.app.companion.coop.parseHostPort
 import com.pokedaisy.app.companion.i18n.tk
 import com.pokedaisy.app.companion.i18n.tr
@@ -113,17 +113,18 @@ internal class CoopSettingsPages(
         pairs = withContext(Dispatchers.IO) { CoopSession.pairsList(activity) }
     }
 
-    /** The library's retail English Emerald ROMs, each with its save's trainer (off the UI thread). */
+    /** The library's retail Emerald ROMs (English, French), each with its save's trainer (off the UI thread). */
     private fun loadChoices(): List<CoopSaveChoice> {
         val prefs = prefs()
         val pairs = CoopSession.pairsList(activity)
         return RomFolder.libraryRoms(activity, prefs)
-            .filter { it.length() == SettingsActivity.EMERALD_ROM_BYTES && RomIdentity.gameCode(it) == "BPEE" && RomIdentity.sha1(it) == EMERALD_COOP_SHA1 }
-            .map { rom ->
+            .filter { it.length() == SettingsActivity.EMERALD_ROM_BYTES && RomIdentity.gameCode(it).let { c -> c == "BPEE" || c == "BPEF" } }
+            .mapNotNull { rom -> RomIdentity.sha1(rom).takeIf { isCoopEmerald(it) }?.let { rom to it } }
+            .map { (rom, sha1) ->
                 val save = SavesLocation.saveFor(activity, prefs, rom)
                 val id = if (save.isFile) CoopSaveId.read(save) else null
                 val pair = id?.let { i -> pairs.firstOrNull { it.ownSave == i } }
-                CoopSaveChoice(rom, save, GameTitles.label(activity, prefs, rom), id, pair?.partner?.name)
+                CoopSaveChoice(rom, save, GameTitles.label(activity, prefs, rom), id, pair?.partner?.name, sha1)
             }
     }
 
@@ -133,7 +134,7 @@ internal class CoopSettingsPages(
         picked = choice
         joinError = null
         nearbyError = null
-        CoopSession.usePairingSave(choice.save, EMERALD_COOP_SHA1)
+        CoopSession.usePairingSave(choice.save, choice.romSha1)
         val p = CoopSession.pairing(activity)
         pairing = p
         val ticket = ticketIn

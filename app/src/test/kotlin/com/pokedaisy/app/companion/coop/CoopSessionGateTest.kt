@@ -1,7 +1,9 @@
 package com.pokedaisy.app.companion.coop
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** [CoopSession.gate]: why co-op stays off, in the order the player should fix things. */
@@ -15,6 +17,12 @@ class CoopSessionGateTest {
         assertEquals(CoopOffReason.NOT_PAIRED, CoopSession.gate(EMERALD_COOP_SHA1, id, false, false))
         assertEquals(CoopOffReason.CHEATS_ON, CoopSession.gate(EMERALD_COOP_SHA1, id, true, true))
         assertNull(CoopSession.gate(EMERALD_COOP_SHA1, id, true, false))
+    }
+
+    @Test fun frenchEmeraldPairs() {
+        assertNull(CoopSession.gate(EMERALD_FR_COOP_SHA1, id, true, false))
+        assertTrue(CoopSession.mayBeRetailEmerald("BPEF", 0x1000000L))
+        assertFalse(CoopSession.mayBeRetailEmerald("BPED", 0x1000000L))
     }
 }
 

@@ -57,13 +57,28 @@ object PartnerArt {
         return pack(own, worn, me, if (worn != null) look else null, rom)
     }
 
-    /** The blob's three frames in [rom], or null if they aren't retail Emerald's. */
+    /** The blob's three frames in [rom] (English Emerald's place, else found by [BLOB_PROBE]), or null if they aren't Emerald's. */
     private fun surfBlob(rom: ByteArray): ByteArray? {
-        val at = CoopEmeraldGen.SURF_BLOB_PIC
-        if (rom.size < at + BLOB_BYTES) return null
+        blobAt(rom, CoopEmeraldGen.SURF_BLOB_PIC)?.let { return it }
+        var i = 0
+        while (i + BLOB_PROBE.size <= rom.size) {
+            if (rom[i] == BLOB_PROBE[0] && (1 until BLOB_PROBE.size).all { rom[i + it] == BLOB_PROBE[it] }) {
+                blobAt(rom, i - BLOB_PROBE_AT)?.let { return it }
+            }
+            i++
+        }
+        return null
+    }
+
+    private fun blobAt(rom: ByteArray, at: Int): ByteArray? {
+        if (at < 0 || rom.size < at + BLOB_BYTES) return null
         val bytes = rom.copyOfRange(at, at + BLOB_BYTES)
         return bytes.takeIf { crc32(it) == CoopEmeraldGen.SURF_BLOB_CRC }
     }
+
+    /** 16 bytes at [BLOB_PROBE_AT] into the blob: finds it in the other languages' Emerald (French), where it moved. */
+    private const val BLOB_PROBE_AT = 684
+    private val BLOB_PROBE = byteArrayOf(0x00, 0x00, 0x00, 0xFF.toByte(), 0x00, 0x60, 0x6F, 0x56, 0x60, 0xFF.toByte(), 0x56, 0x55, 0xF6.toByte(), 0x56, 0x55, 0x55)
 
     /** [pack] with the blob's bytes already read. */
     internal fun assemble(own: Map<LookPart, ByteArray>, worn: Map<LookPart, ByteArray>?, me: LookChar, look: LookChar?, blob: ByteArray): ByteArray? {

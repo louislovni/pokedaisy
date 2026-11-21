@@ -129,7 +129,10 @@ fun coopPartnerRows(pairs: List<CoopPair>, onUnpair: (CoopPair) -> Unit): List<S
     pairs.map { p -> SettingRow(p.partner.name, p.ownLabel) { onUnpair(p) } }
 
 /** A save the pairing page offers: [id] null = no save made yet; [pairedWith] = the partner it already has. */
-class CoopSaveChoice(val rom: File, val save: File, val gameLabel: String, val id: CoopSaveId?, val pairedWith: String?) {
+class CoopSaveChoice(
+    val rom: File, val save: File, val gameLabel: String, val id: CoopSaveId?, val pairedWith: String?,
+    val romSha1: String = com.pokedaisy.app.companion.coop.EMERALD_COOP_SHA1,
+) {
     val usable: Boolean get() = id != null && pairedWith == null
 
     /** The trainer's name as the game writes it. */

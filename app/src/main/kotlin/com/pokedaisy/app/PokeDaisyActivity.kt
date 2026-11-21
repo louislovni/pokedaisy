@@ -3318,7 +3318,7 @@ class PokeDaisyActivity : Activity() {
 
     /**
      * Co-op presence (partner on the field): a [CoopPresence] exists only while a link is attached ([attachCoopLink], the co-op
-     * session's) and the loaded ROM is retail English Emerald (BPEE with [RETAIL_EMERALD_SHA1]); a player without co-op hashes
+     * session's) and the loaded ROM is retail Emerald (BPEE / BPEF, its SHA-1 one co-op pairs); a player without co-op hashes
      * nothing and runs nothing.
      */
     private var coopPresence: CoopPresence? = null
@@ -3332,7 +3332,7 @@ class PokeDaisyActivity : Activity() {
 
     private fun setUpCoopPresence(r: File, gba: Boolean, gameCode: String) {
         stopCoopPresence()
-        coopCandidate = if (gba && gameCode == "BPEE" && r.length() == 16L * 1024 * 1024) r else null
+        coopCandidate = if (gba && (gameCode == "BPEE" || gameCode == "BPEF") && r.length() == 16L * 1024 * 1024) r else null
         startCoopPresence()
     }
 
@@ -3349,7 +3349,7 @@ class PokeDaisyActivity : Activity() {
                 r.inputStream().use { s -> val b = ByteArray(1 shl 16); while (true) { val n = s.read(b); if (n < 0) break; md.update(b, 0, n) } }
                 md.digest().joinToString("") { "%02x".format(it) }
             }.getOrNull()
-            if (sha1 == RETAIL_EMERALD_SHA1) runOnUiThread {
+            if (com.pokedaisy.app.companion.coop.isCoopEmerald(sha1)) runOnUiThread {
                 if (!isDestroyed && !isFinishing && generation == coopGeneration && ::engine.isInitialized && engine === eng &&
                     romData == r && coopPresence == null && coopLink != null) createCoopPresence(r)
             }
@@ -3610,9 +3610,9 @@ class PokeDaisyActivity : Activity() {
     private fun coopAttach(sha1: String?) {
         if (isDestroyed || isFinishing || !::engine.isInitialized || !engine.running) return
         val link = com.pokedaisy.app.companion.coop.CoopSession.link
-        if (!CoopBattles.mayHook(sha1, FeatureFlags.coop(this), link)) return
+        if (link == null || !FeatureFlags.coop(this) || !com.pokedaisy.app.companion.coop.isCoopEmerald(sha1)) return
         attachCoopLink(CoopPresenceChannel(link))
-        CoopBattles.attach(coopApp, link, sha1)
+        CoopBattles.attach(coopApp, link, sha1)   // false (nothing hooked) off English Emerald
     }
 
     @Volatile private var coopPairKeyCache: Pair<com.pokedaisy.app.companion.coop.CoopSaveId, String>? = null
@@ -3788,6 +3788,7 @@ class PokeDaisyActivity : Activity() {
 
     /** One [CoopLock] for the game just started, when its save has a pairing (off the UI thread: [gen] tells a stop from a late start). */
     private fun startCoopLock(sha1: String?, save: File, cheatsLoaded: Boolean, gen: Int) {
+        if (sha1 != com.pokedaisy.app.companion.coop.EMERALD_COOP_SHA1) return   // the lock's addresses are English Emerald's
         val id = com.pokedaisy.app.companion.coop.CoopSaveId.read(save) ?: return
         if (com.pokedaisy.app.companion.coop.CoopSession.gate(sha1, id, true, cheatsLoaded) != null) return
         val pair = com.pokedaisy.app.companion.coop.CoopSession.pairsList(this).firstOrNull { it.ownSave.key == id.key } ?: return
@@ -3829,10 +3830,10 @@ class PokeDaisyActivity : Activity() {
                 return@execute
             }
             val own = RomIdentity.sha1(r)
-            val sha1 = if (own == com.pokedaisy.app.companion.coop.EMERALD_COOP_SHA1) own
+            val sha1 = if (com.pokedaisy.app.companion.coop.isCoopEmerald(own)) own
                 else com.pokedaisy.app.companion.data.RetailDumps.matchStream(code, rev, RomArchive.romSize(r)) { RomArchive.open(r).source() } ?: own
             com.pokedaisy.app.companion.coop.CoopSession.startForGame(applicationContext, prefs, sha1, save, cheatsLoaded)
-            runOnUiThread { coopAttach(sha1) }   // joined battles + presence: retail English Emerald only
+            runOnUiThread { coopAttach(sha1) }   // presence: retail Emerald (English, French); joined battles: English only
             startCoopLock(sha1, save, cheatsLoaded, gen)
         }
     }
@@ -6703,7 +6704,6 @@ class PokeDaisyActivity : Activity() {
         private const val BATTLE_MENU_ACTIONS = 160
 
         /** Retail English Emerald (BPEE): the only game co-op presence runs on. */
-        private const val RETAIL_EMERALD_SHA1 = "f3ae088181bf583e55daf962a92bb46f4f1d07b7"
         /** Games whose Pokémon follow the player already: FOLLOWER isn't offered there. */
         private val FOLLOWERS_OF_THEIR_OWN = setOf(
             com.pokedaisy.app.companion.data.GameKind.HEART_AND_SOUL, com.pokedaisy.app.companion.data.GameKind.SOULGOLD,

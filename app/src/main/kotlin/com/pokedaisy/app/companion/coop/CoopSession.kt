@@ -127,12 +127,12 @@ object CoopSession {
     private var multicast: WifiManager.MulticastLock? = null
     private var gameSave: CoopSaveId? = null
 
-    /** Only a "BPEE" ROM of at most 16 MB (retail Emerald or a trimmed dump of it) is worth hashing for co-op. */
-    internal fun mayBeRetailEmerald(code: String?, size: Long): Boolean = code == "BPEE" && size <= 0x1000000L
+    /** Only a "BPEE" / "BPEF" ROM of at most 16 MB (retail Emerald or a trimmed dump of it) is worth hashing for co-op. */
+    internal fun mayBeRetailEmerald(code: String?, size: Long): Boolean = (code == "BPEE" || code == "BPEF") && size <= 0x1000000L
 
     /** Pure: why co-op stays off for this game, or null. The feature flag is checked by the callers. */
     fun gate(romSha1: String?, save: CoopSaveId?, paired: Boolean, cheatsLoaded: Boolean): CoopOffReason? = when {
-        romSha1 != EMERALD_COOP_SHA1 -> CoopOffReason.NOT_EMERALD
+        !isCoopEmerald(romSha1) -> CoopOffReason.NOT_EMERALD
         save == null -> CoopOffReason.NO_SAVE
         !paired -> CoopOffReason.NOT_PAIRED
         cheatsLoaded -> CoopOffReason.CHEATS_ON
@@ -164,7 +164,7 @@ object CoopSession {
         val app = context.applicationContext
         if (!FeatureFlags.coop(app)) return
         post {
-            val id = if (romSha1 == EMERALD_COOP_SHA1) CoopSaveId.read(saveFile) else null
+            val id = if (isCoopEmerald(romSha1)) CoopSaveId.read(saveFile) else null
             val paired = id != null && try {
                 pairsOf(app).forSave(id) != null
             } catch (e: IOException) {

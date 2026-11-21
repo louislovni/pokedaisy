@@ -12,8 +12,16 @@ import kotlinx.coroutines.flow.StateFlow
 /** The co-op protocol version carried in every [CoopHello]; a partner on another one is refused. */
 const val COOP_PROTOCOL = 1
 
-/** Retail English Emerald, the only game co-op plays (both devices, checked in the HELLO). */
+/** Retail English Emerald: the game co-op's joined battles and story lock know (their addresses are this ROM's). */
 const val EMERALD_COOP_SHA1 = "f3ae088181bf583e55daf962a92bb46f4f1d07b7"
+
+/** Retail French Emerald: pairs and shows the partner on the map (presence), with a partner on the same ROM. */
+const val EMERALD_FR_COOP_SHA1 = "ca666651374d89ca439007bed54d839eb7bd14d0"
+
+/** The ROMs co-op pairs (both devices on the same one, checked in the HELLO). Capsule's iPhone and PC apps accept the same. */
+val EMERALD_COOP_SHA1S = setOf(EMERALD_COOP_SHA1, EMERALD_FR_COOP_SHA1)
+
+fun isCoopEmerald(romSha1: String?): Boolean = romSha1 != null && romSha1 in EMERALD_COOP_SHA1S
 
 /** A device on the link: its X25519 public key, 64 lowercase hex characters. */
 @JvmInline
