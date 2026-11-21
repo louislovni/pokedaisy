@@ -327,6 +327,15 @@ static int hit_find(int px, int py) {
 int quick_hit(int x, int y) { return hit_find(x, y); }
 int quick_list_hit(int x, int y) { return hit_find(x, y); }
 void quick_set_grid(bool grid) { gridMode = grid; }
+
+// How far the menu has opened, 0..1 (quick_set_open): the tiles come out from the middle.
+static double openT = 1;
+void quick_set_open(double t) { openT = t < 0 ? 0 : t > 1 ? 1 : t; }
+// An ease out with a little overshoot, as the app's ring springs open.
+static double open_ease(void) {
+  const double c = 1.4, u = openT - 1;
+  return 1 + (c + 1) * u * u * u + c * u * u;
+}
 static bool square(void) { return !gridMode && pd_font_text_small(); }
 static void grid_shape(int n, int w, int *cols, int *rows) {
   int fit = (w - 24 + TILE_GAP) / (TILE_W + TILE_GAP);
@@ -386,12 +395,12 @@ static bool overrun(int n, double rx, double ry, double g) {
   int half = n / 2;
   return n % 2 == 0 ? t[half] > M_PI : t[half] >= M_PI || between(rx, ry, t[half], -t[half]) < g;
 }
-enum grow { GROW_RADIUS, GROW_GAP, GROW_WIDTH };
+enum grow { GROW_RADIUS, GROW_GAP, GROW_WIDTH, GROW_HEIGHT };
 static double bisect(double lo, double hi, enum grow what, int n, double a, double b) {
   for (int k = 0; k < 40; k++) {
     double mid = (lo + hi) / 2;
     bool grow = what == GROW_RADIUS ? overrun(n, mid, mid, a) : what == GROW_GAP ? !overrun(n, a, a, mid)
-                                                                : overrun(n, b * mid, b, a);
+                : what == GROW_WIDTH ? overrun(n, b * mid, b, a) : overrun(n, b, b * mid, a);
     if (grow)
       lo = mid;
     else
@@ -429,6 +438,12 @@ static void ring_places(int n, int w, int h, int limW, int limH) {
     ry = (limH - h) / 2.0 > h ? (limH - h) / 2.0 : h;
     double wide = ry * bisect(1, 8, GROW_WIDTH, n, g, ry), most = (limW - w) / 2.0 > ry ? (limW - w) / 2.0 : ry;
     rx = wide < most ? wide : most;
+  }
+  if (2 * rx + w > limW) {
+    // Too wide (an upright phone's canvas): as wide as the canvas allows, the oval as tall as it then needs.
+    rx = (limW - w) / 2.0 > w ? (limW - w) / 2.0 : w;
+    double tall = rx * bisect(1, 8, GROW_HEIGHT, n, g, rx), most = (limH - h) / 2.0 > rx ? (limH - h) / 2.0 : rx;
+    ry = tall < most ? tall : most;
   }
   double t[QUICK_COUNT / 2 + 2];
   walk(n, rx, ry, g, t);
@@ -528,10 +543,15 @@ bool quick_draw(struct pd_canvas *c, const struct pd_game *g, const struct quick
   const struct hud_ink *ink = hud_ink(look);
   const uint32_t text = ink->window ? PD_TITLE_TEXT : ink->text;
   const uint32_t shadow = ink->window ? PD_TITLE_SHADOW : ink->shadow;
+  const double grow = open_ease();
   for (int i = 0; i < n; i++) {
     int x, y;
     place(n, i, c->w, c->h, &x, &y);
     hit_add(x, y, TW, TH, i);
+    if (grow < 1) { // opening: drawn on the way out from the middle (hit where it will stop)
+      x = (int)lround((c->w - TW) / 2.0 + (x - (c->w - TW) / 2.0) * grow);
+      y = (int)lround((c->h - TH) / 2.0 + (y - (c->h - TH) / 2.0) * grow);
+    }
     hud_tile(c, ink, x, y, TW, TH, i == sel);
     bool dim = items[i].why != NULL;
     // The game's own art where there is some (the Pokémon that would FLY, the bag's item), pixel art otherwise,
@@ -568,8 +588,8 @@ bool quick_draw(struct pd_canvas *c, const struct pd_game *g, const struct quick
       pd_text(c, x + TW - tw + 1, y, "OFF", ink->onAccent, PD_NO_SHADOW);
     }
   }
-  // The middle: the highlighted one's name, and why it's dimmed (or WILD's state).
-  if (sel >= 0 && sel < n) {
+  // The middle: the highlighted one's name, and why it's dimmed (or WILD's state). Once the tiles are nearly out.
+  if (sel >= 0 && sel < n && openT >= 0.6) {
     const struct quick_item *it = &items[sel];
     const char *name = it->action == QUICK_WILD ? "WILD ENCOUNTERS" : it->label ? it->label : quick_label(it->action);
     const char *note = it->why ? it->why : it->action == QUICK_WILD ? (it->off ? "OFF" : "ON")

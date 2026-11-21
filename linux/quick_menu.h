@@ -32,6 +32,8 @@ void quick_list_draw(struct pd_canvas *c, const char *title, const char *const *
 int quick_step(int n, int sel, int dx, int dy, int w, int h);
 /* RING (default) or GRID layout for the next draw / step (settings.quickGrid). */
 void quick_set_grid(bool grid);
+/* How far the menu has opened, 0..1 (1 by default): quick_draw draws its tiles on their way out from the middle. */
+void quick_set_open(double t);
 /* The tile (quick_draw) or list row (quick_list_draw) the last draw put under (x, y), canvas pixels; -1 = none. */
 int quick_hit(int x, int y);
 int quick_list_hit(int x, int y);

@@ -644,6 +644,7 @@ static int fieldFlags, hudFieldFrames;
 
 /* the quick menu and the game-code jobs: PC, FLY, FLASH, REPEL, BIKE (fly.c, flash.c, field_items.c) */
 static bool quickOpen;
+static int quickFrames; // frames since the quick menu opened (its opening animation)
 static int quickSel;
 static const struct pd_config *flyCfg;
 /* FLASH: the config whose functions this ROM has, and a pick waiting for a frame the game can be called in (counts the
@@ -2298,7 +2299,11 @@ RETRO_API void retro_run(void) {
       draw_wide_quick_background();
     else
       draw_game();
-    dim(0x55);
+    // Opening: the game darkens and the tiles spring out from the middle over about 12 frames.
+    dim(quickFrames >= 6 ? 0x55 : 0x55 * quickFrames / 6);
+    quick_set_open(quickFrames / 12.0);
+    if (quickFrames < 1000)
+      quickFrames++;
     struct pd_canvas qc;
     pd_canvas_init(&qc, quick_width(), quick_height(), ovPixels);
     const char *const *rows = flyList ? flyNames : repelList ? repelNames : NULL;
@@ -2336,6 +2341,8 @@ RETRO_API void retro_run(void) {
     } else
       hudShown = false;
   }
+  if (!quickOpen)
+    quickFrames = 0;
   if (companion && DOCKED)
     dock_draw();
   PF_T(td1);
