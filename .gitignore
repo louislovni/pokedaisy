@@ -74,3 +74,4 @@ __pycache__/
 
 # ROM lists for make rom-support LIST=... (scripts/rom_agent/): local paths, never committed
 roms-to-add*.txt
+app/src/capsule/assets/

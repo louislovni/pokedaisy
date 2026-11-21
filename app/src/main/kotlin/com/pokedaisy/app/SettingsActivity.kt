@@ -133,7 +133,7 @@ import com.pokedaisy.app.companion.ui.drawPixelRoundRect
  */
 class SettingsActivity : ComponentActivity() {
 
-    private enum class Screen { HOME, SPEED, DISPLAY, HOTKEYS, CONTROLS, SHADERS, FIELD_HUD, QUICK_MENU, TOUCH, OVERLAYS, FOLDERS, ROMS_FOLDERS, SAVES_FOLDER, SAVE_SEARCH, STATES_FOLDER, BACKUPS, COVER_ART, SCREENSCRAPER, HIDDEN, ACHIEVEMENTS, CHEATS, CHEAT_ADD, LICENSES, HELP, COOP_PAIR, COOP_JOIN, COOP_PARTNERS, COOP_RELAY }
+    private enum class Screen { HOME, SPEED, DISPLAY, HOTKEYS, CONTROLS, SHADERS, FIELD_HUD, QUICK_MENU, TOUCH, OVERLAYS, FOLDERS, ROMS_FOLDERS, SAVES_FOLDER, SAVE_SEARCH, STATES_FOLDER, BACKUPS, COVER_ART, SCREENSCRAPER, HIDDEN, ACHIEVEMENTS, CHEATS, CHEAT_ADD, LICENSES, HELP, COOP_PAIR, COOP_JOIN, COOP_PARTNERS, COOP_RELAY, COMPAT }
 
     private lateinit var prefs: Prefs
     private var screen by mutableStateOf(Screen.HOME)
@@ -218,6 +218,8 @@ class SettingsActivity : ComponentActivity() {
 
     /** Opened straight on ROMS FOLDERS (the library's + > MANAGE ROMS FOLDERS): BACK from it leaves. */
     private var romsFoldersOnly = false
+    /** Opened on COMPATIBLE GAMES alone (the library's TOOLS card): BACK finishes. */
+    private var compatOnly = false
 
     /** Opened from a game's library menu (CHEATS): BACK from its cheats leaves, not to the hub. */
     private var cheatsOnly = false
@@ -248,6 +250,7 @@ class SettingsActivity : ComponentActivity() {
         when (intent?.getStringExtra(EXTRA_SCREEN)) {
             SCREEN_HELP -> { helpOnly = true; screen = Screen.HELP }
             SCREEN_ROMS_FOLDERS -> { romsFoldersOnly = true; screen = Screen.ROMS_FOLDERS }
+            SCREEN_COMPAT -> { compatOnly = true; screen = Screen.COMPAT }
         }
         // An invite link (CoopLinkActivity is exported: its extra is parsed again here, and ignored with CO-OP off).
         if (FeatureFlags.coop(this)) {
@@ -370,6 +373,7 @@ class SettingsActivity : ComponentActivity() {
                         Screen.COOP_PAIR, Screen.COOP_JOIN -> tk("PAIR")
                         Screen.COOP_PARTNERS -> tk("PARTNERS")
                         Screen.COOP_RELAY -> tk("RELAY")
+                        Screen.COMPAT -> tk("COMPATIBLE GAMES")
                     },
                     m = m,
                     onBack = {
@@ -407,6 +411,7 @@ class SettingsActivity : ComponentActivity() {
                     Screen.COOP_PAIR, Screen.COOP_JOIN -> coop.PairPage(m, small) { screen = Screen.HOME }
                     Screen.COOP_PARTNERS -> coop.PartnersPage(m, revision)
                     Screen.COOP_RELAY -> coop.RelayPage(m, small)
+                    Screen.COMPAT -> SubRowsScreen(m) { compatRows() }
                 }
             }
             if (tab && !wide) LibraryLook { nm, ns ->
@@ -541,6 +546,10 @@ class SettingsActivity : ComponentActivity() {
                 OptionConfirm(title, message, tk("OK"), m, onConfirm = { cheatNotice = null }, onDismiss = { cheatNotice = null }, cancelLabel = null)
             }
 
+            compatNotice?.let { (title, message) ->
+                OptionConfirm(title, message, tk("OK"), m, onConfirm = { compatNotice = null }, onDismiss = { compatNotice = null }, cancelLabel = null)
+            }
+
             overlayNotice?.let { (title, message) ->
                 OptionConfirm(title, message, tk("OK"), m, onConfirm = { overlayNotice = null }, onDismiss = { overlayNotice = null }, cancelLabel = null)
             }
@@ -638,7 +647,8 @@ class SettingsActivity : ComponentActivity() {
             screen == Screen.COOP_PAIR && coop.picking -> coop.leave()
             screen == Screen.COOP_PAIR || screen == Screen.COOP_JOIN -> { coop.leave(); screen = Screen.HOME }
             screen == Screen.HOME && tab -> finishTab(com.pokedaisy.app.companion.ui.LibrarySection.GAMES)
-            screen == Screen.HOME || (screen == Screen.CHEATS && cheatsOnly) || (screen == Screen.ROMS_FOLDERS && romsFoldersOnly) -> finish()
+            screen == Screen.HOME || (screen == Screen.CHEATS && cheatsOnly) || (screen == Screen.ROMS_FOLDERS && romsFoldersOnly) ||
+                (screen == Screen.COMPAT && compatOnly) -> finish()
             // FOLDERS' pages go back to it.
             screen in FOLDER_PAGES -> screen = Screen.FOLDERS
             // SHADERS and OVERLAY open from DISPLAY OPTIONS.
@@ -681,7 +691,12 @@ class SettingsActivity : ComponentActivity() {
 
     /** CAPSULE CLOUD (the account and its saves, capsule/CapsuleCloud.kt) and the Capsule web page (bank, Pokédex, trades). */
     private fun capsuleRows(): List<SettingRow> {
-        if (!com.pokedaisy.app.capsule.CapsuleCloud.enabled) return emptyList()
+        val compat = if (com.pokedaisy.app.capsule.CapsuleCompat.available(this)) listOf(
+            SettingRow(tk("COMPATIBLE GAMES"), null, subtitle = "Which games Capsule knows, and what works with each", opensPage = true) {
+                screen = Screen.COMPAT
+            },
+        ) else emptyList()
+        if (!com.pokedaisy.app.capsule.CapsuleCloud.enabled) return compat
         val cloud = com.pokedaisy.app.capsule.CapsuleCloud
         val email = cloud.email(this)
         val done: (String) -> Unit = { text -> runOnUiThread { capsuleBusy = null; revision++; Toast.makeText(this, text, Toast.LENGTH_LONG).show() } }
@@ -716,7 +731,138 @@ class SettingsActivity : ComponentActivity() {
             SettingRow("CAPSULE WEB", null, subtitle = "Bank, Pokédex and trades in the browser") {
                 openUrl(com.pokedaisy.app.capsule.CapsuleCloud.WEB_PAGE)
             },
+        ) + compat
+    }
+
+    // ---- COMPATIBLE GAMES (capsule build: capsule/CapsuleCompat.kt) ----------
+
+    private val compatMine = androidx.compose.runtime.mutableStateMapOf<String, Pair<com.pokedaisy.app.capsule.CapsuleCompat.Game?, String?>>()
+    private val compatOwned = androidx.compose.runtime.mutableStateListOf<com.pokedaisy.app.capsule.CapsuleCompat.Owned>()
+    private var compatStarted = false
+    private var compatFilter by mutableStateOf("ALL")
+    private var compatNotice by mutableStateOf<Pair<String, String>?>(null)
+
+    /** The library's games against the list, one fingerprint at a time, off the UI thread (each kept once worked out). */
+    private fun identifyCompat(roms: List<File>) {
+        if (compatStarted) return
+        compatStarted = true
+        val compat = com.pokedaisy.app.capsule.CapsuleCompat
+        Thread {
+            for (rom in roms) {
+                val sha = runCatching { compat.sha1(this, rom) }.getOrNull()
+                val match = runCatching { compat.match(this, rom, sha) }.getOrNull()
+                val owned = match?.takeIf { !it.hack }?.let { com.pokedaisy.app.capsule.CapsuleCompat.Owned(it.code, compat.header(rom)?.second, it.title) }
+                runOnUiThread {
+                    compatMine[rom.absolutePath] = match to sha
+                    owned?.let(compatOwned::add)
+                }
+            }
+        }.apply { name = "capsule-compat"; isDaemon = true }.start()
+    }
+
+    private fun compatName(g: com.pokedaisy.app.capsule.CapsuleCompat.Game) = g.title + if (g.version.isNotEmpty()) " (${g.version})" else ""
+
+    private fun compatYesNo(v: String) = when (v) { "yes" -> tr("YES"); "likely" -> tr("LIKELY"); else -> tr("NO") }
+
+    /** The short line under a game: hack or not, the bank, and a hack's base ROM in the library or not. */
+    private fun compatLine(g: com.pokedaisy.app.capsule.CapsuleCompat.Game): String {
+        val base = g.base?.let { b ->
+            when (val st = com.pokedaisy.app.capsule.CapsuleCompat.state(b, compatOwned)) {
+                com.pokedaisy.app.capsule.CapsuleCompat.BaseState.Have -> tr("Base ROM: in your library")
+                is com.pokedaisy.app.capsule.CapsuleCompat.BaseState.OtherRevision -> tr("Base ROM: another revision ({0})", st.revision)
+                com.pokedaisy.app.capsule.CapsuleCompat.BaseState.Missing -> tr("Base ROM: not in your library")
+            }
+        }
+        return listOfNotNull(if (g.hack) "Hack" else null, tr("Bank: {0}", compatYesNo(g.bank)), base).joinToString(" · ")
+    }
+
+    /** Everything about a game, for its tap. */
+    private fun compatDetail(g: com.pokedaisy.app.capsule.CapsuleCompat.Game, sha1: String? = null): Pair<String, String> {
+        val lines = mutableListOf(
+            if (g.hack) tr("A hack") else tr("An official game"),
+            tr("Companion here: {0}", if (g.pokedaisy) tr("YES") else tr("NO")),
+            tr("Capsule bank: {0}", compatYesNo(g.bank)),
         )
+        g.base?.let { b ->
+            lines += tr("Base ROM: {0}", b.title)
+            lines += when (val st = com.pokedaisy.app.capsule.CapsuleCompat.state(b, compatOwned)) {
+                com.pokedaisy.app.capsule.CapsuleCompat.BaseState.Have -> tr("It's in your library: ready for PATCH A ROM.")
+                is com.pokedaisy.app.capsule.CapsuleCompat.BaseState.OtherRevision ->
+                    tr("You have another revision ({0}): this hack needs the one above.", st.revision)
+                com.pokedaisy.app.capsule.CapsuleCompat.BaseState.Missing -> tr("It's not in your library.")
+            }
+        }
+        g.note?.let { lines += it }
+        if (g.unverified && g.note == null) lines += tr("Recognised, not checked in a game yet.")
+        sha1?.let { lines += tr("Fingerprint (SHA-1): {0}", it) }
+        return compatName(g) to lines.joinToString("\n")
+    }
+
+    private fun compatRows(): List<SettingRow> {
+        val compat = com.pokedaisy.app.capsule.CapsuleCompat
+        val roms = RomFolder.libraryRoms(this, prefs)
+        identifyCompat(roms)
+        val filters = listOf(tk("ALL"), tk("HACKS"), tk("OFFICIAL"), tk("COMPANION"))
+        val rows = mutableListOf(
+            SettingRow(tk("SHOW"), compatFilter) {
+                selector = Selector(tk("SHOW"), filters, compatFilter) { compatFilter = it }
+            },
+        )
+        if (roms.isNotEmpty()) {
+            rows += groupTitle(tk("YOUR GAMES"))
+            for (rom in roms) {
+                val result = compatMine[rom.absolutePath]
+                val match = result?.first
+                rows += SettingRow(
+                    GameTitles.label(this, prefs, rom),
+                    when {
+                        result == null -> "…"
+                        match == null -> tk("UNKNOWN")
+                        match.pokedaisy -> tk("COMPANION")
+                        else -> tk("PLAYS")
+                    },
+                    subtitle = when {
+                        result == null -> "Checking its fingerprint…"
+                        match == null -> "Unknown version: it plays, without the companion"
+                        else -> compatName(match)
+                    },
+                ) {
+                    when {
+                        match != null -> compatNotice = compatDetail(match, result?.second)
+                        result != null -> compatNotice = tr("UNKNOWN") to listOfNotNull(
+                            tr("Unknown version: it plays, without the companion. The bank opens it only if its save has a format Capsule knows."),
+                            result.second?.let { tr("Fingerprint (SHA-1): {0}", it) },
+                        ).joinToString("\n")
+                    }
+                }
+            }
+        }
+        val shown = compat.games(this).filter { g ->
+            when (compatFilter) {
+                "HACKS" -> g.hack
+                "OFFICIAL" -> !g.hack
+                "COMPANION" -> g.pokedaisy
+                else -> true
+            }
+        }
+        for ((console, name) in listOf("GBA" to tk("GAME BOY ADVANCE"), "GB" to tk("GAME BOY / COLOR"), "DS" to tk("NINTENDO DS"))) {
+            val list = shown.filter { it.console == console }
+            if (list.isEmpty()) continue
+            rows += groupTitle(tr(name) + " · " + list.size)
+            for (g in list) {
+                rows += SettingRow(compatName(g), if (g.pokedaisy) tk("COMPANION") else tk("PLAYS"), subtitle = compatLine(g)) {
+                    compatNotice = compatDetail(g)
+                }
+            }
+        }
+        rows += groupTitle(tk("ABOUT THIS LIST"))
+        rows += SettingRow(
+            tk("ABOUT THIS LIST"), null,
+            subtitle = "Which games Capsule recognises, never where to find one",
+        ) {
+            compatNotice = tr("ABOUT THIS LIST") to tr("The list says which games Capsule recognises, not where to find one. Every game plays, listed or not: only the companion and the bank need the exact version. Hacks come as patches for your own original cartridge.")
+        }
+        return rows
     }
 
     // ---- hub --------------------------------------------------------------
@@ -2444,6 +2590,8 @@ class SettingsActivity : ComponentActivity() {
         const val EXTRA_SECTION = "section"
         /** [EXTRA_SCREEN]: FOLDERS > ROMS FOLDERS alone (the library's + > MANAGE ROMS FOLDERS). */
         const val SCREEN_ROMS_FOLDERS = "ROMS_FOLDERS"
+        /** [EXTRA_SCREEN]: COMPATIBLE GAMES alone (Capsule's build: the library's TOOLS card). */
+        const val SCREEN_COMPAT = "COMPAT"
         /** Cheat files are text; anything bigger isn't one. */
         const val MAX_CHEAT_FILE = 1 shl 20
         /** Retail Emerald is 16 MB: the only size worth hashing for co-op. */

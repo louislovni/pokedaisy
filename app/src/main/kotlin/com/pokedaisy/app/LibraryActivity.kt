@@ -496,6 +496,11 @@ class LibraryActivity : ComponentActivity() {
             com.pokedaisy.app.companion.ui.LibraryTool("SPRITES", "SPRITE PACK", "Load other games' looks for MAKEOVER", nf.badge(nf.SPRITE_PACK)) {
                 pickSpritePack.launch(arrayOf("*/*"))
             },
+        ) + listOfNotNull(
+            // Capsule's build: the games it knows (capsule/CapsuleCompat.kt, its list in the APK's assets).
+            com.pokedaisy.app.companion.ui.LibraryTool("COMPAT", "COMPATIBLE GAMES", "Which games Capsule knows, and what works with each", null) {
+                startActivity(Intent(this, SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_SCREEN, SettingsActivity.SCREEN_COMPAT))
+            }.takeIf { com.pokedaisy.app.capsule.CapsuleCompat.available(this) },
         )
     }
 

@@ -533,6 +533,8 @@ internal object ToolIcons {
         "COLLECTION" -> collection
         "TRANSFER" -> transfer
         "SPRITES" -> sprites
+        // Capsule's COMPATIBLE GAMES: the games' own cartridge.
+        "COMPAT" -> games
         else -> null
     }
 
