@@ -1,4 +1,5 @@
 #include "pd_canvas.h"
+#include "pd_tr.h"
 
 #include <math.h>
 #include <string.h>
@@ -301,10 +302,16 @@ static int draw_run(struct pd_canvas* c, int x, int y, const char* s, uint32_t c
     return x - x0;
 }
 
-int pd_text(struct pd_canvas* c, int x, int y, const char* s, uint32_t color, uint32_t shadow) {
+static int text_raw(struct pd_canvas* c, int x, int y, const char* s, uint32_t color, uint32_t shadow) {
     // Every glyph's shadow first, then the letters: one string's shadow never covers its own letters.
     if (shadow != PD_NO_SHADOW) draw_run(c, x, y, s, shadow, true);
     return draw_run(c, x, y, s, color, false);
+}
+static int width_raw(const char* s);
+
+// Every public text call takes its string through pd_tr (the companion's language); the raw ones don't.
+int pd_text(struct pd_canvas* c, int x, int y, const char* s, uint32_t color, uint32_t shadow) {
+    return text_raw(c, x, y, pd_tr(s), color, shadow);
 }
 
 // The string at [num] / [den] of its size (smaller), smoothed: its coverage sampled 4 x 4 per pixel from the font's, a
@@ -314,6 +321,7 @@ int pd_text_mini_width(const char* s, int num, int den) {
     return (pd_text_width(s) * num + den - 1) / den;
 }
 int pd_text_mini(struct pd_canvas* c, int x, int y, const char* s, uint32_t color, uint32_t shadow, int num, int den) {
+    s = pd_tr(s);
     static uint8_t src[PD_FONT_HEIGHT][MINI_W];
     static uint8_t out[PD_FONT_HEIGHT + 1][MINI_W + 1];
     memset(src, 0, sizeof src);
@@ -368,7 +376,8 @@ int pd_text_mini(struct pd_canvas* c, int x, int y, const char* s, uint32_t colo
 }
 
 int pd_text_scaled(struct pd_canvas* c, int x, int y, const char* s, uint32_t color, uint32_t shadow, int scale) {
-    if (scale <= 1) return pd_text(c, x, y, s, color, shadow);
+    s = pd_tr(s);
+    if (scale <= 1) return text_raw(c, x, y, s, color, shadow);
     int x0 = x;
     for (const char* p = s; *p;) {
         const struct pd_glyph* g = pd_font_pixel_glyph(next_codepoint(&p));
@@ -395,6 +404,7 @@ int pd_text_narrow_shifted(struct pd_canvas* c, int x, int y, const char* s, uin
                            int shift) {
     // Font column k covers [x + k * num / den, x + (k + 1) * num / den): whole canvas pixels, some columns a pixel
     // narrower than others (FittedGbaText's 3 / 2 / 1.5 / 1 wide letters).
+    s = pd_tr(s);
     int col = 0;
     for (const char* p = s; *p;) {
         const struct pd_glyph* g = pd_font_pixel_glyph(next_codepoint(&p));
@@ -411,13 +421,16 @@ int pd_text_narrow_shifted(struct pd_canvas* c, int x, int y, const char* s, uin
     return col * num / den;
 }
 
-int pd_text_width(const char* s) {
+int pd_text_width(const char* s) { return width_raw(pd_tr(s)); }
+
+static int width_raw(const char* s) {
     int w = 0;
     while (*s) w += pd_font_glyph(next_codepoint(&s))->advance;
     return w;
 }
 
 int pd_text_width_pixel(const char* s) {
+    s = pd_tr(s);
     int w = 0;
     while (*s) w += pd_font_pixel_glyph(next_codepoint(&s))->advance;
     return w;
@@ -428,9 +441,10 @@ int pd_text_width_scaled(const char* s, int scale) {
 }
 
 int pd_text_fit(struct pd_canvas* c, int x, int y, int max_w, const char* s, uint32_t color, uint32_t shadow) {
-    if (pd_text_width(s) <= max_w) return pd_text(c, x, y, s, color, shadow);
+    s = pd_tr(s);
+    if (width_raw(s) <= max_w) return text_raw(c, x, y, s, color, shadow);
     char buf[128];
-    int ell = pd_text_width("...");
+    int ell = width_raw("...");
     int w = 0;
     size_t n = 0;
     const char* p = s;
@@ -446,15 +460,17 @@ int pd_text_fit(struct pd_canvas* c, int x, int y, int max_w, const char* s, uin
     }
     memcpy(buf, s, n);
     memcpy(buf + n, "...", 4);
-    return pd_text(c, x, y, buf, color, shadow);
+    return text_raw(c, x, y, buf, color, shadow);
 }
 
 void pd_text_right(struct pd_canvas* c, int right, int y, const char* s, uint32_t color, uint32_t shadow) {
-    pd_text(c, right - pd_text_width(s), y, s, color, shadow);
+    s = pd_tr(s);
+    text_raw(c, right - width_raw(s), y, s, color, shadow);
 }
 
 int pd_text_wrap(struct pd_canvas* c, int x, int y, int max_w, int lineH, int maxLines, const char* s,
                  uint32_t color, uint32_t shadow) {
+    s = pd_tr(s);
     char line[160];
     int lines = 0;
     while (lines < maxLines) {
@@ -472,7 +488,7 @@ int pd_text_wrap(struct pd_canvas* c, int x, int y, int max_w, int lineH, int ma
             if (n >= sizeof(line)) break;
             memcpy(line, s, n);
             line[n] = 0;
-            if (pd_text_width(line) > max_w) break;
+            if (width_raw(line) > max_w) break;
             end = wordEnd;
             p = wordEnd;
             while (*p == ' ') p++;
@@ -504,7 +520,7 @@ int pd_text_wrap(struct pd_canvas* c, int x, int y, int max_w, int lineH, int ma
         if (c && cut) {
             pd_text_fit(c, x, y + lines * lineH, max_w, line, color, shadow);
         } else if (c) {
-            pd_text(c, x, y + lines * lineH, line, color, shadow);
+            text_raw(c, x, y + lines * lineH, line, color, shadow);
         }
         lines++;
     }

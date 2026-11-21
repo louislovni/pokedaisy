@@ -23,6 +23,9 @@ SIZE = 16
 SCALE = 10
 # ASCII plus the few non-ASCII letters the names use (Poké Ball, Pokémon ...).
 EXTRA = "é×·"
+# French (the companion's French text, pd_tr): its accented letters, guillemets and apostrophe.
+FRENCH = "àâäçèêëîïôöùûüÀÂÄÇÈÉÊËÎÏÔÖÙÛÜœŒ«»’°"
+EXTRA += FRENCH
 CHARS = [chr(c) for c in range(32, 127)] + list(EXTRA)
 
 # Pixel Operator has no gender symbols; these are drawn here, on the font's
@@ -206,7 +209,56 @@ SMALL_GLYPHS = {
 }
 
 
+# FRENCH's small letters: the base letter's art with its accent drawn above (two rows: a lower-case letter's empty top
+# rows, or LIFT rows above a capital's) or its cedilla under it.
+LIFT = 2
+_ACCENTS = {
+    "acute": ("..#", ".#."), "grave": ("#..", ".#."), "circ": (".#.", "#.#"), "trema": ("...", "#.#"),
+}
+_FRENCH_BASE = {
+    "à": ("a", "grave"), "â": ("a", "circ"), "ä": ("a", "trema"), "è": ("e", "grave"), "ê": ("e", "circ"),
+    "ë": ("e", "trema"), "î": ("i", "circ"), "ï": ("i", "trema"), "ô": ("o", "circ"), "ö": ("o", "trema"),
+    "ù": ("u", "grave"), "û": ("u", "circ"), "ü": ("u", "trema"),
+    "À": ("A", "grave"), "Â": ("A", "circ"), "Ä": ("A", "trema"), "È": ("E", "grave"), "É": ("E", "acute"),
+    "Ê": ("E", "circ"), "Ë": ("E", "trema"), "Î": ("I", "circ"), "Ï": ("I", "trema"), "Ô": ("O", "circ"),
+    "Ö": ("O", "trema"), "Ù": ("U", "grave"), "Û": ("U", "circ"), "Ü": ("U", "trema"),
+}
+
+
+def _accent_rows(width, kind):
+    a, b = _ACCENTS[kind]
+    pad = (width - 3) // 2
+    fit = lambda r: ("." * pad + r + "." * width)[:width] if width >= 3 else r[1:1 + width]
+    return [fit(a), fit(b)]
+
+
+def _french_small():
+    for ch, (base, kind) in _FRENCH_BASE.items():
+        width, art = SMALL_GLYPHS[base]
+        if base in "iI":  # a 1 / 3 wide stem: the accent needs 3
+            stem = ".#." if width == 3 else None
+            art = [(line.replace("#", ".#.") if base == "i" else line) for line in art]
+            width = 3
+            art = [(l if len(l) == 3 else ".#.") for l in art]
+            if base == "i":
+                art = ["...", "..."] + art[2:]
+        acc = _accent_rows(width, kind)
+        if base.islower():
+            SMALL_GLYPHS[ch] = (width, acc + list(art[2:]))
+        else:
+            SMALL_GLYPHS[ch] = (width, list(art), acc)
+    SMALL_GLYPHS["ç"] = (4, list(SMALL_GLYPHS["c"][1]) + ["..#.", ".#.."])
+    SMALL_GLYPHS["Ç"] = (5, list(SMALL_GLYPHS["C"][1]) + ["..#..", ".#..."])
+    SMALL_GLYPHS["œ"] = (7, [".......", ".......", ".##.##.", "#..#..#", "#..####", "#..#...", "#..#..#", ".##.##."])
+    SMALL_GLYPHS["Œ"] = (7, [".######", "#..#...", "#..#...", "#..###.", "#..#...", "#..#...", "#..#...", ".######"])
+    SMALL_GLYPHS["«"] = (5, [".....", ".....", "..#.#", ".#.#.", "#.#..", ".#.#.", "..#.#"])
+    SMALL_GLYPHS["»"] = (5, [".....", ".....", "#.#..", ".#.#.", "..#.#", ".#.#.", "#.#.."])
+    SMALL_GLYPHS["’"] = (1, ["#", "#"])
+    SMALL_GLYPHS["°"] = (3, [".#.", "#.#", ".#."])
+
+
 def small(out):
+    _french_small()
     count = len(CHARS) + len(PIXEL_GLYPHS)
     order = CHARS + list(PIXEL_GLYPHS)
     missing = [ch for ch in order if ch not in SMALL_GLYPHS]
@@ -215,13 +267,14 @@ def small(out):
     out.append("// its diagonal steps softened (pd_font_small_alpha / _cover).")
     alphas, covers, glyphs = [], [], []
     for ch in order:
-        width, art = SMALL_GLYPHS[ch]
-        assert all(len(line) == width for line in art), ch
+        width, art, *lift = SMALL_GLYPHS[ch]
+        lift = lift[0] if lift else []
+        assert all(len(line) == width for line in list(art) + list(lift)), ch
         rows = [0] * SIZE
-        for y, line in enumerate(art):
+        for y, line in enumerate(list(lift) + list(art)):
             for x, px in enumerate(line):
                 if px == "#":
-                    rows[SMALL_TOP + y] |= 1 << x
+                    rows[SMALL_TOP - len(lift) + y] |= 1 << x
         lit = lambda x, y: 0 <= x < 16 and 0 <= y < SIZE and rows[y] >> x & 1
         alpha = [0] * 256
         for y in range(SIZE):

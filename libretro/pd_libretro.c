@@ -24,6 +24,7 @@
 #include "pd_flight_gen.h"
 #include "pk_wide.h"
 #include "quick_menu.h"
+#include "pd_tr.h"
 #include "wild.h"
 #include "pd_dex.h"
 #include "pd_font.h"
@@ -2425,3 +2426,6 @@ RETRO_API void retro_pd_dock_touch(int x, int y, int down) {
   else
     dockTouchDown = false;
 }
+
+/* The companion's language ("fr"; NULL / "en" = English): its words, menus and the guide's text (pd_tr). */
+RETRO_API void retro_pd_language(const char *code) { pd_tr_set_language(code); }

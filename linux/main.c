@@ -63,6 +63,27 @@ static void notice(const char *s) {
   fprintf(stderr, "%s\n", s);
 }
 
+/* "fr" for a French system (POKEDAISY_LANG first), else "en": the companion's language. */
+static const char *host_language(void) {
+  const char *set = getenv("POKEDAISY_LANG");
+  if (set && *set)
+    return set;
+#ifdef _WIN32
+  LANGID id = GetUserDefaultUILanguage();
+  if (PRIMARYLANGID(id) == LANG_FRENCH)
+    return "fr";
+#else
+  const char *env = getenv("LC_ALL");
+  if (!env || !*env)
+    env = getenv("LC_MESSAGES");
+  if (!env || !*env)
+    env = getenv("LANG");
+  if (env && !strncmp(env, "fr", 2))
+    return "fr";
+#endif
+  return "en";
+}
+
 /* ---- input ---- */
 enum {
   A,
@@ -1702,6 +1723,12 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     sramCopy.data = n ? malloc(n) : NULL;
     if (sramCopy.data)
       sramCopy.size = save_image(sramCopy.data);
+  }
+  {
+    // The companion's language (the GBA core's menus and guide): POKEDAISY_LANG, else the system's.
+    void (*language)(const char *) = (void (*)(const char *))dlsym(core.dl, "retro_pd_language");
+    if (language)
+      language(host_language());
   }
 #ifdef CAPSULE_COOP
   if (!dsGame) {

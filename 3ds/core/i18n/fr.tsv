@@ -1,0 +1,198 @@
+# The C companion's own French (pd_tr; 3ds/tools/gen_tr.py). ENGLISH<TAB>FRENCH. A format's French takes {0}, {1} ...
+# for the English's conversions, in order. Most of the companion's words come from the app's tables (gen_tr.py).
+  NONE	  AUCUN
+  UNAVAILABLE	  INDISPONIBLE
+ (WITH %s)	 (AVEC {0})
+ (egg)	 (œuf)
+ (first: see below)	 (premier : voir plus bas)
+ / ATK < DEF	 / ATQ < DEF
+ / ATK = DEF	 / ATQ = DEF
+ / ATK > DEF	 / ATQ > DEF
+ / personality	 / personnalité
+ / spare party slot	 / place libre dans l'équipe
+ This game's guide hasn't been checked in-game yet.	 Le guide de ce jeu n'a pas encore été vérifié en jeu.
+%.40s - %d POKéMON - UP TO LV%d - YOUR BEST LV%d	{0} - {1} POKéMON - JUSQU'AU N.{2} - TON MEILLEUR N.{3}
+%d ALIVE · %d FAINTED	{0} EN FORME · {1} K.O.
+%d TABS	{0} ONGLETS
+%d steps left	{0} pas restants
+%s  LV%d-%d	{0}  N.{1}-{2}
+%s  PWR %d	{0}  PUIS {1}
+%s LV%d-%d	{0} N.{1}-{2}
+%s in the %s.	{0} dans {1}.
+%s x%d  %d steps	{0} x{1}  {2} pas
+. HOLDS %s	. TIENT {0}
+<  PREV	<  PRÉC.
+>  NEXT	>  SUIV.
+A MOVES	A CAPACITÉS
+A STATS	A STATS
+A battle opens this tab by itself,	Un combat ouvre cet onglet tout seul,
+ALL BEATEN	TOUS BATTUS
+Adamant	Rigide
+At most 5 on the bar; the rest open from MORE.	5 au plus dans la barre ; les autres s'ouvrent depuis PLUS.
+B  BACK	B  RETOUR
+B BACK	B RETOUR
+BASE STATS	STATS DE BASE
+BRN	BRU
+Back to the game list? What the game saved stays saved; anything since is lost.	Retour à la liste des jeux ? Ce que le jeu a sauvegardé reste ; le reste est perdu.
+Bashful	Pudique
+Bold	Assuré
+Brave	Brave
+CURRENT MOVES	CAPACITÉS ACTUELLES
+Calm	Calme
+Can't take off now	Impossible de décoller ici
+Careful	Prudent
+Confirming target...	Choix de la cible...
+Could not open the PC	Impossible d'ouvrir le PC
+Deposit in which BOX?	Déposer dans quelle BOÎTE ?
+Docile	Docile
+EV TOTAL  %d	EV TOTAL  {0}
+Every gym leader and the League are beaten.	Tous les champions et la Ligue sont battus.
+FIGHT!	COMBAT !
+FNT	K.O.
+FRIENDSHIP %d	AMITIÉ {0}
+FRZ	GEL
+Friendship by day	Amitié de jour
+Friendship by night	Amitié de nuit
+GRASS	HERBES
+Gentle	Gentil
+Go back to the saved state? Play since then is lost; the save file isn't touched.	Revenir à l'état enregistré ? Ce qui a été joué depuis est perdu ; la sauvegarde n'est pas touchée.
+HERE and BOSS come straight from the game's own data.	ICI et BOSS viennent directement des données du jeu.
+HIDDEN POWER  %s	PUIS. CACHÉE  {0}
+HIDDEN POWER  %s %d	PUIS. CACHÉE  {0} {1}
+HM	CS
+HT %s   WT %s	TAILLE {0}   POIDS {1}
+HUD CURSOR BUTTON	BOUTON CURSEUR HUD
+Hardy	Hardi
+Hasty	Pressé
+IMMUNE	IMMUNISÉ
+ITEM %d	OBJET {0}
+Impish	Malin
+It will hatch in time.	Il éclora avec le temps.
+Its buildings included. A ball = done.	Bâtiments compris. Une balle = fait.
+Jolly	Jovial
+LEAVE GAME	QUITTER LE JEU
+LEVEL-UP MOVES	CAPACITÉS PAR NIVEAU
+LV %d	N. {0}
+LV%d	N.{0}
+LV%d  %d%%	N.{0}  {1}%
+LV%d-%d  %d%%	N.{0}-{1}  {2}%
+Lax	Lâche
+Level up with beauty	Niveau avec la beauté
+Level up with friendship	Niveau avec l'amitié
+Lonely	Solo
+Lv%d	N.{0}
+Lv.%d	N.{0}
+Lying	Par terre
+Lying around.	Par terre, dans le coin.
+MAP %d	CARTE {0}
+MYSTERY	MYSTÈRE
+Mild	Doux
+Modest	Modeste
+Mystery	Mystère
+NEUTRAL	NEUTRE
+NEXT %lu	SUIVANT {0}
+NO BAG YET	PAS ENCORE DE SAC
+NO BATTLE	PAS DE COMBAT
+NO BOXES YET	PAS ENCORE DE BOÎTES
+NO FOE	PAS D'ADVERSAIRE
+NO GUIDE	PAS DE GUIDE
+NO MAP	PAS DE CARTE
+NO POKéDEX YET	PAS ENCORE DE POKéDEX
+NO TRAINER CARD	PAS DE CARTE DRESSEUR
+Naive	Naïf
+Naughty	Mauvais
+No HUD on screen	Pas de HUD à l'écran
+No evolution links found.	Aucune évolution trouvée.
+No learnset data.	Pas de données de capacités.
+No level-up moves.	Aucune capacité par niveau.
+No matching entries.	Aucun résultat.
+No party member can use a Potion	Personne dans l'équipe ne peut utiliser une Potion
+No.%03d	N°{0}
+No.%03d  %s	N°{0}  {1}
+Not for this game:	Pas pour ce jeu :
+OWN 	PRIS 
+PAR	PAR
+PLACE	LIEU
+POKéMON %d	POKéMON {0}
+PP %d	PP {0}
+PSN	PSN
+PWR %d	PUIS {0}
+PWR %d  PP %d	PUIS {0}  PP {1}
+PWR %s PP %d	PUIS {0} PP {1}
+PWR -	PUIS -
+PWR -  PP %d	PUIS -  PP {0}
+PkMn	PkMn
+PokeDaisy core	Cœur PokeDaisy
+Potion unavailable	Potion indisponible
+Put every companion setting back to how it started? Your saves and states aren't touched.	Remettre tous les réglages du compagnon comme au départ ? Tes sauvegardes et états ne sont pas touchés.
+QUICK MENU BUTTON	BOUTON MENU RAPIDE
+Quiet	Discret
+Quirky	Bizarre
+RESET SETTINGS	RÉINITIALISER
+RESIST	RÉSISTE
+RESISTED	RÉSISTÉ
+Rash	Foufou
+Relaxed	Relax
+SEEN 	VUS 
+SEEN %d  OWN %d	VUS {0}  PRIS {1}
+SEL %s	SEL {0}
+SEL INFO	SEL INFOS
+SEL LEARN	SEL APPRENDRE
+SEL MOVES	SEL CAPACITÉS
+SELECT  FILTER	SELECT  FILTRE
+SELECT  SWITCH	SELECT  CHANGER
+SELECT  TAB   A  JUMP	SELECT  ONGLET   A  ALLER
+SETTINGS has what was detected.	RÉGLAGES montre ce qui a été détecté.
+SEVII 1-3	SEVII 1-3
+SLOT %d	EMPL. {0}
+SLP	SOM
+SUPER	SUPER
+Sassy	Malpoli
+Save a state of the game as it is now? It replaces the last one. The save file isn't touched.	Enregistrer un état du jeu tel qu'il est ? Il remplace le précédent. La sauvegarde n'est pas touchée.
+Serious	Sérieux
+Shown over the overworld, off in menus and battles.	Affiché sur la carte du jeu, caché dans les menus et les combats.
+Someone	Quelqu'un
+Someone %s gives you an EGG: %s.	Quelqu'un {0} te donne un ŒUF : {1}.
+Someone has it.	Quelqu'un l'a.
+Species details unavailable for this cartridge.	Détails des espèces indisponibles pour cette cartouche.
+Start the game again from its save? Anything since the last save is lost.	Relancer le jeu depuis sa sauvegarde ? Ce qui suit la dernière sauvegarde est perdu.
+Stats unavailable for this cartridge.	Stats indisponibles pour cette cartouche.
+TEACHABLE MOVES	CAPACITÉS ENSEIGNABLES
+TM	CT
+TOX	TOX
+TRAINER CARD	CARTE DRESSEUR
+Take off from land	Décolle depuis la terre ferme
+The POKéDEX shows once the game	Le POKéDEX s'affiche une fois que le jeu
+The bag is empty.	Le sac est vide.
+The bag shows once the game	Le sac s'affiche une fois que le jeu
+The boxes show once the game	Les boîtes s'affichent une fois que le jeu
+The card shows once a save is loaded,	La carte s'affiche une fois une sauvegarde chargée,
+The card's art wasn't found in this ROM.	Les images de la carte sont introuvables dans cette ROM.
+The region map's art wasn't found	Les images de la carte de la région sont introuvables
+There's no guide for this game yet.	Pas encore de guide pour ce jeu.
+This version's POKéDEX tables	Les tables du POKéDEX de cette version
+Timid	Timide
+Trade holding 	Échange en tenant 
+UNKNOWN ITEM	OBJET INCONNU
+Use 	Utiliser 
+Use the game's own menu.	Utilise le menu du jeu.
+Used! It lasts %d steps.	Utilisé ! Il dure {0} pas.
+WITH %s - %s	AVEC {0} - {1}
+Waiting for your turn...	En attente de ton tour...
+Wild encounters off	Rencontres sauvages coupées
+Wild encounters on	Rencontres sauvages activées
+Wild encounters restored	Rencontres sauvages rétablies
+You haven't been anywhere to FLY to yet.	Aucun endroit où VOLER pour l'instant.
+ZOOM OUT	DÉZOOM
+and its end takes you back.	et sa fin te ramène.
+aren't in the 3DS companion yet.	ne sont pas encore dans le compagnon 3DS.
+has loaded a save.	a chargé une sauvegarde.
+in FireRed, LeafGreen and Emerald.	dans Rouge Feu, Vert Feuille et Émeraude.
+in this ROM.	dans cette ROM.
+none yet	aucun pour l'instant
+route 	route 
+the GBA games the companion reads.	les jeux GBA que le compagnon lit.
+HOST	HÔTE
+This guide was written with the help of AI, from the game's own data. It can still get details wrong or leave things out - double-check anything that matters before relying on it.	Ce guide a été écrit avec l'aide d'une IA, à partir des données du jeu. Il peut se tromper sur des détails ou en oublier : vérifie ce qui compte avant de t'y fier.
+This guide was written with the help of AI, from the game's own data. It can still get details wrong or leave things out - double-check anything that matters before relying on it. This game's guide hasn't been checked in-game yet.	Ce guide a été écrit avec l'aide d'une IA, à partir des données du jeu. Il peut se tromper sur des détails ou en oublier : vérifie ce qui compte avant de t'y fier. Le guide de ce jeu n'a pas encore été vérifié en jeu.
+NUZLOCKE tracking is off for this game. Turn it on and the companion keeps score of your run: only the first wild POKéMON in each area counts, and a POKéMON that faints is out for good.	Le suivi NUZLOCKE est désactivé pour ce jeu. Active-le et le compagnon tient le compte de ta partie : seul le premier POKéMON sauvage de chaque zone compte, et un POKéMON K.O. est perdu pour de bon.

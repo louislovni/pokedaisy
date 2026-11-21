@@ -1,6 +1,7 @@
 /* The QUICK MENU (quick_menu.h): tiles of one size round a circle, the first at the top, clockwise; the
  * highlighted one's name in the middle, with why it's dimmed. GPL-3.0, see ../NOTICE. */
 #include "quick_menu.h"
+#include "pd_tr.h"
 #include "hud_style.h"
 
 #include "pd_icon.h"
@@ -491,7 +492,7 @@ static int label_lines(const char *label, char a[32], char b[32]) {
 static void measure(const struct quick_item *items, int n) {
   int w = square() ? 30 : 38, lines = 1;
   for (int i = 0; i < n; i++) {
-    const char *label = items[i].label ? items[i].label : quick_label(items[i].action);
+    const char *label = pd_tr(items[i].label ? items[i].label : quick_label(items[i].action));
     char a[32], b[32];
     int k = label_lines(label, a, b);
     if (k > lines)
@@ -565,7 +566,7 @@ bool quick_draw(struct pd_canvas *c, const struct pd_game *g, const struct quick
       art = pd_draw_item_icon(c, g, items[i].item, x + (TW - PD_ITEM_ICON) / 2, iconY - 12, dim);
     if (!art)
       icon(c, items[i].action, x + TW / 2, iconY, 1, dim || items[i].off, ink);
-    const char *label = items[i].label ? items[i].label : quick_label(items[i].action);
+    const char *label = pd_tr(items[i].label ? items[i].label : quick_label(items[i].action));
     char la[32], lb[32];
     int lines = label_lines(label, la, lb);
     uint32_t col = dim ? ink->muted : items[i].lit ? ink->accent : text;
