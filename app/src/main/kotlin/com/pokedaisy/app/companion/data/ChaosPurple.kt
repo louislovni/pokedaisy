@@ -14,7 +14,9 @@ import okio.Path
  * - its type chart: HeartGold's triples with Fairy's rows, in overlay 130 ([TYPE_CHART_OFFSET]);
  * - its party icons' palettes: a byte per species at the start of overlay [ICON_PALETTE_OVERLAY] (GetMonIconPalette,
  *   retail's 0x02074364, jumps to 0x023D9950, which reads 0x023D8000 + species);
- * - its level-up moves: a member of `/a/0/3/3` per species ({ u16 move, u16 level } to 0xFFFF), not one file.
+ * - its level-up moves: a member of `/a/0/3/3` per species ({ u16 move, u16 level } to 0xFFFF), not one file;
+ * - its map headers: hg-engine's own NARC ([MAP_HEADERS_FILE], 590 of 24 bytes), not retail's ARM9 table, whose
+ *   encounter banks are stale (Viridian City's in RAM is bank 129, the ARM9's says 96: checked headless).
  *
  * Told apart from Heartfelt by its overlay table (149 overlays: [matches]).
  */
@@ -29,6 +31,8 @@ object ChaosPurple {
     /** Its type chart (122 triples, 0xFF-ended): overlay 130's file + 0x10E89. */
     const val TYPE_CHART_OFFSET = 0x3F2889L
     const val ICON_PALETTE_OVERLAY = 129
+    /** Its map headers, a member a map: the first byte the encounter bank in `/a/0/3/7` (WILD ENCOUNTERS' rates). */
+    const val MAP_HEADERS_FILE = "/a/0/5/0"
     /** Its last personal record. */
     const val LAST_SPECIES = 1392
 

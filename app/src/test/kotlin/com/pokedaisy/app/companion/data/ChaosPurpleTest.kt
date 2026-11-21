@@ -39,6 +39,10 @@ class ChaosPurpleTest {
         assertEquals(200, data.typeChart[9 * 100 + 16])                 // its chart in overlay 130: Fairy beats Dragon
         assertEquals(0, data.typeChart[16 * 100 + 9])
         assertEquals(2, data.moveCategories[45])                        // GROWL: status
+        // Its map headers' banks (/a/0/5/0): Viridian City's rates as the game loads them (RAM, headless), Route 1's.
+        fun rates(map: Int) = data.wildRates.toList().chunked(3).firstOrNull { it[0] == map }?.drop(1)
+        assertEquals(listOf(20, 10), rates(50))
+        assertEquals(listOf(20, 0), rates(15))
     }
 
     @Test

@@ -447,10 +447,15 @@ object NdsArt {
         }
         // Each map header's encounter bank (0xFF = none) into its encounter archive: the walking and surfing rates, its
         // own (what the field read puts back for WILD ENCOUNTERS, as Origin's).
-        val headers = f.read(HeartfeltGold.MAP_HEADERS_OFFSET, HeartfeltGold.MAP_HEADER_COUNT * 24)
+        // Chaos Purple's are hg-engine's own (`/a/0/5/0`, a 24-byte member a map: [ChaosPurple.MAP_HEADERS_FILE]).
+        val ownHeaders = if (ChaosPurple.matches { off, len -> f.read(off, len) })
+            file(f, header, ChaosPurple.MAP_HEADERS_FILE)?.let { Narc(it) } else null
+        val headers = if (ownHeaders != null) ByteArray(ownHeaders.size * 24).also { all ->
+            for (map in 0 until ownHeaders.size) ownHeaders.member(map)?.takeIf { it.size >= 24 }?.copyInto(all, map * 24, 0, 24)
+        } else f.read(HeartfeltGold.MAP_HEADERS_OFFSET, HeartfeltGold.MAP_HEADER_COUNT * 24)
         val encounters = file(f, header, "/a/0/3/7")?.let { Narc(it) }
         val rates = ArrayList<Int>()
-        for (map in 0 until HeartfeltGold.MAP_HEADER_COUNT) {
+        for (map in 0 until headers.size / 24) {
             val bank = u8(headers, map * 24)
             val e = if (bank == 0xFF) null else encounters?.member(bank)
             if (e != null && e.size >= 2) rates += listOf(map, u8(e, 0), u8(e, 1))

@@ -61,7 +61,7 @@ change to any of the places listed under "Where it's decided" updates its rows h
 | White 2 (DS) | France, Germany, Spain, Italy, Korea; Japan rev 1 ³¹ | ✅ ¹⁴ | ✅ ²⁷ | — | — | — | ✅ ¹⁴ | — | ✅ ¹⁴ | ◐ ¹⁴ | ✅ ¹⁴ | ✅ ¹⁴ | ✅ ¹⁶ | n/a | — | — | — | — ³⁶ |
 | Origin HeartGold (DS) | 4.0.3 English 1.0.0 | ✅ ¹⁴ | — ²⁹ | — | — | — | ✅ ²⁹ | — | ✅ ²⁹ | ✅ ¹⁴ | ✅ ²⁹ | ✅ ²⁹ | — | n/a | — | — | — | — ³⁶ |
 | Heartfelt Gold (DS) | 1.0.15 (+ Zoomed In) | ✅ ³⁷ | ✅ ³⁷ | — | — | — | ✅ ³⁷ | — | ✅ ³⁷ | — | ✅ ³⁷ | ✅ ³⁷ | — | n/a | — | — | — | — ³⁶ |
-| Chaos Purple (DS) | demo (Silph Co. fix) | ◐ ⁴¹ | ◐ ⁴¹ | — | — | — | ◐ ⁴¹ | — | ✅ ⁴¹ | — | ◐ ⁴¹ | ◐ ⁴¹ | — | n/a | — | — | — | — ³⁶ |
+| Chaos Purple (DS) | demo (Silph Co. fix) | ✅ ⁴¹ | ✅ ⁴¹ | — | — | — | ✅ ⁴¹ | — | ✅ ⁴¹ | — | ✅ ⁴¹ | ✅ ⁴¹ | — | n/a | — | — | — | — ³⁶ |
 | Renegade Platinum (DS) | 1.3.0 (+ Classic, shiny rate, Speed Up), 1.2.0 | ✅ ³² | ✅ ³² | — | — | — | ✅ ³² | — | ✅ ³² | ◐ ³² | ◐ ³² | ✅ ³² | — | n/a | — | — | — | — ³⁶ |
 | Blaze Black 2 Redux (DS) | 1.4.1, + Classic / EVless / Classic EVless | ✅ ³⁵ | ✅ ³⁵ | — | — | — | ✅ ³⁵ | — | ✅ ³⁵ | ◐ ¹⁴ | ✅ ³⁵ | ✅ ³⁵ | ✅ ¹⁶ | n/a | — | — | — | — ³⁶ |
 | Volt White 2 Redux (DS) | 1.4.1, + Classic / EVless / Classic EVless | ✅ ³⁵ | ✅ ³⁵ | — | — | — | ✅ ³⁵ | — | ✅ ³⁵ | ◐ ¹⁴ | ✅ ³⁵ | ✅ ³⁵ | ✅ ¹⁶ | n/a | — | — | — | — ³⁶ |
@@ -656,11 +656,16 @@ change to any of the places listed under "Where it's decided" updates its rows h
     party knows FLY" while the game offered Fly (Discord). Checked headless on the user's save: HM02 given, then a Pidgey
     lead can learn it (0), a Pikachu can't (1); the flags read 0 there (no save with the device bought to try).
 41. Chaos Purple (the demo with its Silph Co. fix, SHA-1 `330d9eb5…`; 2026-11-21) is another hg-engine build over the US
-    HeartGold (`ChaosPurple`), read as Heartfelt Gold: the same header signature (ARM9 0x111EF8) with 149 overlays. The field
-    read was checked headless on the player's save (`nds_dump`-style boot to the overworld: sSaveDataPtr / sFieldSysPtr the US
-    cart's, its SaveData's section table equal to Heartfelt's, overlays 0-128 at retail's addresses, the battle overlay 12 at
-    0x022378C0). EXPAND, the battle buttons, FLY, WILD ENCOUNTERS and PC anywhere run HeartGold's code at those same addresses,
-    as for Heartfelt, but weren't tried in it yet (◐).
+    HeartGold (`ChaosPurple`), read as Heartfelt Gold: the same header signature (ARM9 0x111EF8) with 149 overlays. Each
+    column checked headless on the player's save with `nds_dump` (Pallet Town, Viridian City, Route 1): the field read
+    (sSaveDataPtr / sFieldSysPtr the US cart's, its SaveData's section table equal to Heartfelt's); EXPAND drew the town,
+    the Pokémon Center and the route past the screen's edges (its follower too); PC anywhere opened the storage system
+    (DEPOSIT, then a box); FLY (`action 3`) landed in Viridian City; WILD ENCOUNTERS OFF walked 180 steps of Route 1's
+    grass with no battle and ON met one, the map's rates held at 0 and put back (20 / 10 in Viridian, as the cart's);
+    the battle buttons' taps at HeartGold's places (`NdsBattleTaps.GEN4`) opened FIGHT's panel and used SCRATCH on a wild
+    RATTATA. Its map headers aren't retail's ARM9 table but hg-engine's `/a/0/5/0` (590 members): the wild rates the app
+    puts back are read from there (`ChaosPurple.MAP_HEADERS_FILE`; the ARM9's table gave Viridian bank 96, the game uses
+    129). Bike / surf weren't tried.
 
 ## What each column is
 
