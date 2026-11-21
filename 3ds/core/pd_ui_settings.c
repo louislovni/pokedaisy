@@ -395,6 +395,12 @@ void ui_settings_tab(struct pd_ui* ui, struct pd_canvas* c, const struct pd_game
     if (!full && host && host->hasCoreRows) {
         if (host->fieldSupported) setting(ui, c, ix, &y, iw, SETTING_AUTO_RUN, "AUTO-RUN", st->autoRun ? "ON" : "OFF");
         setting(ui, c, ix, &y, iw, SETTING_DARK, "DARK MODE", st->darkMode ? "ON" : "OFF");
+        // The look: the companion's THEME and, where the host tints the field, DAY AND NIGHT.
+        const char* themeName = pd_themes[0].label;
+        for (int i = 0; i < pd_theme_count; i++)
+            if (pd_themes[i].id == st->theme) themeName = pd_themes[i].label;
+        setting(ui, c, ix, &y, iw, SETTING_THEME, "THEME", themeName);
+        if (host->hasDayNight) setting(ui, c, ix, &y, iw, SETTING_DAY_NIGHT, "DAY AND NIGHT", st->dayNight ? "ON" : "OFF");
     }
     snprintf(buf, sizeof(buf), "%d TABS", ui_bar_count(ui));
     setting(ui, c, ix, &y, iw, SETTING_TAB_BAR, "TAB BAR", buf);

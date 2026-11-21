@@ -601,8 +601,10 @@ static void act(struct pd_ui* ui, int id) {
         ui->action = PD_ACTION_NUZLOCKE_TOGGLE;
     } else if (id == HIT_SETTING + SETTING_FLY_ON) {
         ui->overlay = PD_OVERLAY_PICK_FLY_ON;
-    } else if (id == HIT_SETTING + SETTING_DARK || id == HIT_SETTING + SETTING_FF_MODE || id == HIT_SETTING + SETTING_CHEATS) {
+    } else if (id == HIT_SETTING + SETTING_DARK || id == HIT_SETTING + SETTING_FF_MODE || id == HIT_SETTING + SETTING_CHEATS ||
+               id == HIT_SETTING + SETTING_DAY_NIGHT) {
         bool* flag = id == HIT_SETTING + SETTING_DARK ? &ui->settings->darkMode :
+            id == HIT_SETTING + SETTING_DAY_NIGHT ? &ui->settings->dayNight :
             id == HIT_SETTING + SETTING_FF_MODE ? &ui->settings->ffNormal : &ui->settings->cheats;
         *flag = !*flag;
         ui->action = PD_ACTION_SETTINGS_CHANGED;

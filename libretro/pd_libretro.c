@@ -1317,6 +1317,9 @@ RETRO_API bool retro_load_game(const struct retro_game_info *g) {
   host.hasExpand = true;
   host.fieldSupported = fieldKnown; // AUTO-RUN (the field read tells walking from scripts, battles and bikes)
   host.hasCoreRows = true; // AUTO-RUN, DARK MODE, RESET SETTINGS
+#ifndef PD_ARMGBA
+  host.hasDayNight = PD_BE_IS_GBA(); // DAY AND NIGHT (pk_wide's tint)
+#endif
   host.hasFlightArea = freeFlight;
   host.flightSupported = freeFlight; // FLY STYLE / FLIGHT AREA / FLY ON (SCENIC needs scenic_ok, else classic)
   host.itemCanUse = polishedActions ? polished_potion : NULL;
@@ -1390,8 +1393,11 @@ RETRO_API void retro_reset(void) {
     layer_jump();
 }
 
+static void day_night_reset(void);
+
 RETRO_API void retro_unload_game(void) {
 #ifndef PD_ARMGBA
+  day_night_reset();
   coop_game_changed();
 #endif
   pk_flight_configure(NULL, 0);
@@ -1518,6 +1524,63 @@ static void hud_field_tick(void) {
                          : (fieldFlags & PK_FIELD_KNOWN) && !(fieldFlags & (PK_FIELD_LOCKED | PK_FIELD_BATTLE)) &&
                                (!wideSupported || pk_wide_scene() == PK_WIDE_SCENE_FIELD) && flyStage == 0;
   hudFieldFrames = field ? hudFieldFrames + 1 : 0;
+}
+
+/* DAY AND NIGHT (the app's DayNight.kt): outdoors on the field, the map tinted by the clock - night blue, dawn pink, dusk
+ * orange - eased a little each frame; none in battles, indoors and off. */
+static int dayTint[3] = {256, 256, 256};
+static void day_night_target(int out[3]) {
+  static const struct { float h; int c[3]; } keys[] = {
+    {0, {135, 150, 225}}, {4.5f, {135, 150, 225}}, {6, {245, 220, 220}}, {7.5f, {256, 256, 256}},
+    {16.5f, {256, 256, 256}}, {18, {255, 200, 165}}, {19.5f, {135, 150, 225}}, {24, {135, 150, 225}},
+  };
+  out[0] = out[1] = out[2] = 256;
+  const int type = snap.posOk ? snap.mapType : -1;
+  const bool outdoors = type < 0 || type == 1 || type == 2 || type == 3 || type == 6;
+  if (!settings.dayNight || !outdoors || snap.inBattle || (fieldFlags & PK_FIELD_BATTLE))
+    return;
+  time_t now = time(NULL);
+  struct tm tmv;
+#ifdef _WIN32
+  localtime_s(&tmv, &now);
+#else
+  localtime_r(&now, &tmv);
+#endif
+  const float h = tmv.tm_hour + tmv.tm_min / 60.f;
+  int i = 0;
+  while (i < 6 && keys[i + 1].h <= h)
+    i++;
+  const float t = keys[i + 1].h > keys[i].h ? (h - keys[i].h) / (keys[i + 1].h - keys[i].h) : 0;
+  for (int c = 0; c < 3; c++)
+    out[c] = (int)(keys[i].c[c] + (keys[i + 1].c[c] - keys[i].c[c]) * t);
+}
+static void day_night_tick(void) {
+#ifdef PD_ARMGBA
+  return; // pk_wide's tint hooks mGBA's renderer
+#endif
+  if (!PD_BE_IS_GBA())
+    return;
+  int target[3];
+  day_night_target(target);
+  bool moved = false;
+  for (int c = 0; c < 3; c++) {
+    int d = target[c] - dayTint[c];
+    if (d) {
+      dayTint[c] += d > 4 ? 4 : d < -4 ? -4 : d;
+      moved = true;
+    }
+  }
+  if (moved)
+    pk_tint_set(core, dayTint[0], dayTint[1], dayTint[2]);
+}
+
+/* A game closed: no tint left for the next. */
+static void day_night_reset(void) {
+#ifndef PD_ARMGBA
+  if (dayTint[0] != 256 || dayTint[1] != 256 || dayTint[2] != 256)
+    pk_tint_set(core, 256, 256, 256);
+#endif
+  dayTint[0] = dayTint[1] = dayTint[2] = 256;
 }
 
 /* The companion, drawn into `canvas` (the game's, or the dock's swapped in). */
@@ -2084,6 +2147,7 @@ RETRO_API void retro_run(void) {
       gameKeyFrames--;
     if (PD_BE_IS_GBA())
       pk_rest_note(core);
+    day_night_tick();
     if (fieldKnown)
       fieldFlags = pk_field_state(core, settings.runIndoors, wildSwitch && settings.wildOff ? 0 : 100);
     if (gbf) {

@@ -105,6 +105,7 @@ struct pd_settings {
     bool gameMuted;  // MUTE GAME
     bool autoRun;    // AUTO-RUN: B held for the player while walking
     bool darkMode;   // DARK MODE
+    bool dayNight;   // DAY AND NIGHT: the field tinted by the time of day (hosts with hasDayNight)
     bool ffNormal;   // FF MODE: NORMAL; off = SMART, 1x while the game waits for the player
     bool cheats;     // CHEATS: the game's file's codes on
     int theme;       // THEME: a pd_themes[] id
@@ -211,6 +212,7 @@ struct pd_host_info {
     char stateWhen[24]; // when it was made, shown beside LOAD STATE
     bool fullSettings;  // Optional: SETTINGS' groups and the rows the 3DS has
     bool wildSupported, fieldSupported; // WILD ENCOUNTERS / the field read works on this game
+    bool hasDayNight;    // Optional: DAY AND NIGHT's row (the host tints the field by the clock)
     bool hasCoreRows;    // the compact list adds AUTO-RUN (with fieldSupported), DARK MODE and RESET SETTINGS (the libretro cores)
     int batteryPct;     // -1 = unknown
     bool charging;      // the battery is charging (a bolt by it)

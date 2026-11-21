@@ -44,6 +44,7 @@ void pd_settings_defaults(struct pd_settings* s) {
     s->gameMuted = false;
     s->autoRun = false;
     s->darkMode = false;
+    s->dayNight = false;
     s->ffNormal = false;
     s->cheats = false;
     s->theme = 8; // POKéDAISY
@@ -91,6 +92,7 @@ bool pd_settings_load(struct pd_settings* s, const char* path) {
         }
         else if (!strcmp(key, "guide")) int_in(value, 0, 0x7FFFFFFF, &s->guideNotice);
         else if (!strcmp(key, "dark")) s->darkMode = atoi(value) != 0;
+        else if (!strcmp(key, "daynight")) s->dayNight = atoi(value) != 0;
         else if (!strcmp(key, "ffnormal")) s->ffNormal = atoi(value) != 0;
         else if (!strcmp(key, "cheats")) s->cheats = atoi(value) != 0;
         else if (!strcmp(key, "theme")) int_in(value, 0, 99, &s->theme);
@@ -171,7 +173,7 @@ bool pd_settings_save(const struct pd_settings* s, const char* path) {
             s->rewind ? 1 : 0, s->runIndoors ? 1 : 0);
     fprintf(f, "quickbtn=%d\ncompanionbtn=%d\nhudbtn=%d\n", s->quickBtn, s->companionBtn, s->hudBtn);
     fprintf(f, "dark=%d\ntheme=%d\nffnormal=%d\ncheats=%d\n", s->darkMode, s->theme, s->ffNormal, s->cheats);
-    fprintf(f, "librarygrid=%d\nlibraryrecent=%d\n", s->libraryGrid, s->libraryRecent);
+    fprintf(f, "librarygrid=%d\nlibraryrecent=%d\ndaynight=%d\n", s->libraryGrid, s->libraryRecent, s->dayNight);
     fprintf(f, "speed=%d\nvolume=%d\nnohints=%d\nonetap=%d\nmute=%d\nautorun=%d\nperf=%d\n", s->gameSpeed,
             s->gameVolume, s->hideHints, s->oneTapMoves, s->gameMuted, s->autoRun, s->showPerf ? 1 : 0);
     fprintf(f, "gen5=%d\nnoinfo=%d\ninfofirst=%d\n", s->battleGen5 ? 1 : 0, s->noBattleInfo ? 1 : 0, s->battleInfoFirst ? 1 : 0);

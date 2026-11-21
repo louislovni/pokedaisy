@@ -158,6 +158,7 @@ enum setting_row {
     SETTING_INSTANT_TEXT,
     SETTING_TRADE_EVOS,
     SETTING_NUZLOCKE,
+    SETTING_DAY_NIGHT,  // hosts with hasDayNight: flips in place
     SETTING_SCENE,      // + enum pd_scene: SCENE SPEEDS' rows, each a pick-list
 };
 
