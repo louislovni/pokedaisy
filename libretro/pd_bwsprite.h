@@ -20,6 +20,9 @@ bool bws_ready(void);
 bool bws_draw(int national, bool back, bool shiny, int t, uint32_t *dst, int stride, const int clip[4], float ox, float oy,
               float scale);
 
+/* The cart has [national]'s picture (loads it). */
+bool bws_has(int national, bool back);
+
 /* How far up [national]'s picture reaches from its ground point at rest (DS pixels, <= 0); 0 if none. */
 int bws_top(int national, bool back);
 

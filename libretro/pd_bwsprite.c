@@ -511,6 +511,10 @@ static const struct frame *frame_at(const struct frame *fr, const struct seq *s,
   return &fr[s->first + s->count - 1];
 }
 
+bool bws_has(int national, bool back) {
+  return bws_ready() && national >= 1 && national <= 649 && get(national, back) != NULL;
+}
+
 int bws_top(int national, bool back) {
   if (!bws_ready() || national < 1 || national > 649)
     return 0;

@@ -2575,8 +2575,10 @@ RETRO_API int retro_pd_lights(float *out, int max) {
 #ifndef PD_ARMGBA
 #include "pd_bwsprite.h"
 
-#define BS_SPRITES 0x02020630u      /* gSprites (Emerald, every language but Japanese) */
-#define BS_SPRITE_IDS 0x020241E4u   /* gBattlerSpriteIds */
+/* gSprites (every language but Japanese): Emerald's, FireRed / LeafGreen's; gBattlerSpriteIds sits 0x160 past
+ * gBattleMons in both. */
+#define BS_SPRITES (game.kind == PD_GAME_EMERALD ? 0x02020630u : 0x0202063Cu)
+#define BS_SPRITE_IDS (game.cfg->battleMons + 0x160u)
 static struct {
   uint16_t tile;
   int species, national;
@@ -2590,7 +2592,7 @@ static bool bsActive; /* drawn over the last frame: the canvas takes the slow pa
  * gives them: a foe's gMonFrontAnimsPtrTable[species] (the table found in the ROM from a wild battle's foe, its first
  * pointer that fits), the player's side gAnims_MonPic (learnt as the first anims there that aren't the trainer's back
  * picture's, which a battle opens with). */
-static uint32_t bsFrontTable, bsMonBack, bsTrainerBack;
+static uint32_t bsFrontTable, bsMonBack, bsTrainerBack, bsMonFront;
 static bool bsWasInBattle;
 
 static uint32_t bs_rom32(uint32_t a) {
@@ -2634,7 +2636,8 @@ RETRO_API void retro_pd_battle_sprites(const char *ndsPath) {
 }
 
 static bool bs_game(void) {
-  return bws_ready() && game.cfg && game.kind == PD_GAME_EMERALD && game.code[3] != 'J' && PD_BE_IS_GBA();
+  return bws_ready() && game.cfg && (game.kind == PD_GAME_EMERALD || game.kind == PD_GAME_FIRERED) &&
+         (game.cfg->battleMons == 0x02024084u || game.cfg->battleMons == 0x02023BE4u) && PD_BE_IS_GBA();
 }
 
 /* After the game ran a frame: which battlers to leave out of the next one. */
@@ -2656,16 +2659,18 @@ static void bs_after_run(void) {
     }
     uint8_t type[4] = {0};
     pd_lr_read_memory(core, game.cfg->battleTypeFlags, type, 4);
-    // A battle opens with the trainer's back picture on the player's side.
-    if (!bsWasInBattle)
+    // A battle opens with the trainer's back picture on the player's side, the foe's picture (other anims) facing it -
+    // once both are up (FireRed's first frames hold two placeholder sprites with the same anims).
+    if (!bsWasInBattle && count >= 2 && anims[0] && anims[1] && anims[0] != anims[1] && (anims[0] >> 24) == 0x08) {
       for (int b = 0; b < count && b < 4; b++)
         if (!(pos[b] & 1) && anims[b])
           bsTrainerBack = anims[b];
-    bsWasInBattle = true;
+      bsWasInBattle = true;
+    }
     // Waiting for the player's pick: every battler's picture is its Pokémon's (a battle resumed from a state never
     // showed the trainers), so what's learnt from the start can be learnt here too.
     int waitingFor = -1;
-    enum pd_battle_state st = (bsMonBack && bsFrontTable) ? PD_BATTLE_NONE
+    enum pd_battle_state st = (bsMonBack && (bsFrontTable || bsMonFront)) ? PD_BATTLE_NONE
                               : pd_battle_state_read(game.cfg, pd_lr_read_memory, core, &waitingFor);
     bool picking = st == PD_BATTLE_ACTION || st == PD_BATTLE_MOVE;
     for (int b = 0; b < count && b < 4; b++) {
@@ -2674,8 +2679,11 @@ static void bs_after_run(void) {
         continue;
       if (!(pos[b] & 1) && !bsMonBack && ((bsTrainerBack && anims[b] != bsTrainerBack) || picking))
         bsMonBack = anims[b];
-      if ((pos[b] & 1) && !bsFrontTable && (!(type[0] & 0x08) || picking)) // a wild battle's foe is its Pokémon from the start
+      if ((pos[b] & 1) && !bsFrontTable && (!(type[0] & 0x08) || picking)) { // a wild battle's foe is its Pokémon from the start
         bs_find_front(anims[b], sp[0] | sp[1] << 8);
+        if (!bsFrontTable) // FireRed: one anims for every foe's picture
+          bsMonFront = anims[b];
+      }
     }
     for (int b = 0; b < 4; b++) {
       bsMon[b].on = false;
@@ -2689,7 +2697,9 @@ static void bs_after_run(void) {
       if (status2 & (0x01000000u | 0x00200000u)) // behind a substitute, or transformed: the game's own picture
         continue;
       int species = mon[0] | mon[1] << 8;
-      bool isMon = pos[b] & 1 ? bsFrontTable && species > 0 && species <= 411 && anims[b] == bs_rom32(bsFrontTable + 4u * (uint32_t)species)
+      bool isMon = pos[b] & 1 ? (bsFrontTable && species > 0 && species <= 411 &&
+                                 anims[b] == bs_rom32(bsFrontTable + 4u * (uint32_t)species)) ||
+                                    (bsMonFront && anims[b] == bsMonFront)
                               : bsMonBack && anims[b] == bsMonBack;
       if (!isMon) // a trainer's picture (the battle's start), or not known yet
         continue;
@@ -2709,6 +2719,8 @@ static void bs_after_run(void) {
       bsMon[b].shiny = ((ot >> 16) ^ (ot & 0xFFFF) ^ (p >> 16) ^ (p & 0xFFFF)) < 8;
       bsMon[b].national = national;
       bsMon[b].back = !(pos[b] & 1);
+      if (!bws_has(national, bsMon[b].back))
+        continue;
       if (bsMon[b].gap < 0) {
         // The game's picture's lowest row: where its Pokémon stands (64 x 64, 4bpp, 1D).
         uint8_t px[2048];
