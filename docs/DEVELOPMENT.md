@@ -2962,6 +2962,13 @@ bridge, two cores in one process), `lock_*` / `story_*` (the lock and the story 
 engines: starts, cancels, stories, the end, the drop rule, catches and their acknowledgement), `CoopOpQueueTest`, `CoopBattlesTest` (the
 glue: stop order and fail-closed stops, busy / state blocks, message hopping, STATUS) and `CoopSafetyTest`.
 
+**French Emerald.** The bridge is built twice (`pk_api.cmake`): once per cart, each build's external names renamed by a
+pre-included header (`pk_coop_en_names.h` / `pk_coop_fr_names.h`; the French one also pre-includes `pk_coop_emerald_fr.h`,
+`scripts/gen_coop_emerald_fr.py`'s map of the French cart). `pk_coop_dispatch.c` gives the app the usual `pk_coop_*` calls and hands
+each to the loaded cart's build (ROM 0x080000AF 'F'); reset / uninstall / the call hooks go to both. All three files come from
+`scripts/gen_coop_dispatch.py`. Story joins stay English only (the lock's addresses): `storyAt` is NONE on French Emerald. The
+libretro core (Capsule) links both builds without the dispatcher: `libretro/pd_coop_battle.inc` picks by the ROM's SHA-1.
+
 ### The link bridge (a joined battle as a link battle)
 
 A joined battle is Emerald's own link multi battle: both devices run the game's link code, the host as the

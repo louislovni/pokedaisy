@@ -3606,13 +3606,17 @@ class PokeDaisyActivity : Activity() {
         return true
     }
 
+    /** The co-op game's SHA-1 (English or French Emerald): story joins are English Emerald's only (the lock's addresses). */
+    @Volatile private var coopSha1: String? = null
+
     /** The retail Emerald game has the hook once its SHA-1 is known: hash done off the UI thread by [coopStart]. */
     private fun coopAttach(sha1: String?) {
         if (isDestroyed || isFinishing || !::engine.isInitialized || !engine.running) return
         val link = com.pokedaisy.app.companion.coop.CoopSession.link
         if (link == null || !FeatureFlags.coop(this) || !com.pokedaisy.app.companion.coop.isCoopEmerald(sha1)) return
         attachCoopLink(CoopPresenceChannel(link))
-        CoopBattles.attach(coopApp, link, sha1)   // false (nothing hooked) off English Emerald
+        coopSha1 = sha1
+        CoopBattles.attach(coopApp, link, sha1)   // false (nothing hooked) off retail English / French Emerald
     }
 
     @Volatile private var coopPairKeyCache: Pair<com.pokedaisy.app.companion.coop.CoopSaveId, String>? = null
@@ -3675,6 +3679,7 @@ class PokeDaisyActivity : Activity() {
             }
             override fun busyChanged(busy: Boolean) { RetroAchievements.coopBattle = busy }
             override fun storyAt(): com.pokedaisy.app.companion.data.coop.CoopJoinRules.StoryAt {
+                if (coopSha1 != com.pokedaisy.app.companion.coop.EMERALD_COOP_SHA1) return com.pokedaisy.app.companion.data.coop.CoopJoinRules.StoryAt.NONE
                 // The lock's hold names the event it parks the player at; otherwise the player's own spot decides.
                 val held = (coopLock?.ui?.value?.waiting as? com.pokedaisy.app.companion.coop.lock.LockWait.AtStory)?.eventId ?: 0
                 val event = if (held != 0) com.pokedaisy.app.companion.data.coop.CoopStory.byId(held)

@@ -54,11 +54,28 @@ add_subdirectory("${MGBA_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/mgba" EXCLUDE_FROM_A
 # ---------------------------------------------------------------------------
 set(PK_API_SOURCES
     pk_session.c pk_call.c pk_host.c pk_cheats.c pk_rewind.c pk_savevf.c pk_wide.c pk_wide_gb.c pk_flight.c pk_gb_audio.c
+    pk_coop_dispatch.c)
+list(TRANSFORM PK_API_SOURCES PREPEND "${PK_API_DIR}/")
+# The co-op bridge, built once per cart (English and French Emerald), each build's names renamed (pk_coopen_* / pk_coopfr_*:
+# scripts/gen_coop_dispatch.py); pk_coop_dispatch.c gives the app the pk_coop_* calls, handed to the loaded cart's build.
+set(PK_COOP_SOURCES
     pk_coop.c pk_coop_field.c pk_coop_after.c pk_coop_lock.c pk_coop_link.c pk_coop_link_start.c pk_coop_link_wild.c
     pk_coop_link_story.c pk_coop_link_drop.c pk_coop_link_rewards.c pk_coop_link_end.c)
-list(TRANSFORM PK_API_SOURCES PREPEND "${PK_API_DIR}/")
+list(TRANSFORM PK_COOP_SOURCES PREPEND "${PK_API_DIR}/")
 
 add_library(pk_api STATIC ${PK_API_SOURCES})
+foreach(cart en fr)
+    add_library(pk_coop_${cart} OBJECT ${PK_COOP_SOURCES})
+    set_target_properties(pk_coop_${cart} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_compile_definitions(pk_coop_${cart} PRIVATE USE_PTHREADS M_CORE_GBA M_CORE_GB)
+    target_include_directories(pk_coop_${cart} PRIVATE "${PK_API_DIR}" "${MGBA_DIR}/include" "${MGBA_DIR}/src"
+        "${CMAKE_CURRENT_BINARY_DIR}/mgba/include")
+    add_dependencies(pk_coop_${cart} mgba)
+endforeach()
+target_compile_options(pk_coop_en PRIVATE "SHELL:-include ${PK_API_DIR}/pk_coop_en_names.h")
+target_compile_options(pk_coop_fr PRIVATE "SHELL:-include ${PK_API_DIR}/pk_coop_emerald_fr.h"
+    "SHELL:-include ${PK_API_DIR}/pk_coop_fr_names.h")
+target_sources(pk_api PRIVATE $<TARGET_OBJECTS:pk_coop_en> $<TARGET_OBJECTS:pk_coop_fr>)
 set_target_properties(pk_api PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # mGBA's own sources get these (add_definitions in its directory only). Some of its
 # structs change shape with them - mCoreRewindContext is ~100 bytes longer with

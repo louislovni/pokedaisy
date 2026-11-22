@@ -2,7 +2,7 @@ package com.pokedaisy.app
 
 import com.pokedaisy.app.companion.coop.CoopLink
 import com.pokedaisy.app.companion.coop.CoopState
-import com.pokedaisy.app.companion.coop.EMERALD_COOP_SHA1
+import com.pokedaisy.app.companion.coop.isCoopEmerald
 import com.pokedaisy.app.companion.data.coop.CoopBattleChannel
 import com.pokedaisy.app.companion.data.coop.CoopBattleMsg
 import com.pokedaisy.app.companion.data.coop.CoopBattleWire
@@ -320,9 +320,10 @@ object CoopBattles {
     /** The lock's story hold at [eventId] waits for the join decision of that story battle (the offer, its prompt, its answer). */
     fun storyPending(eventId: Int): Boolean = glue?.flow?.storyPending(eventId) == true
 
-    /** Only retail English Emerald (its SHA-1, a retail dump counts), with the flag on and a link; nothing else gets a hook. */
+    /** Only retail English or French Emerald (their SHA-1s, a retail dump counts; the native bridge picks the cart's build),
+     * with the flag on and a link; nothing else gets a hook. */
     fun mayHook(romSha1: String?, flagOn: Boolean, link: CoopLink?): Boolean =
-        flagOn && link != null && romSha1 == EMERALD_COOP_SHA1
+        flagOn && link != null && isCoopEmerald(romSha1)
 
     /** The glue for this game, hooked into the engine; false (nothing touched) for anything but retail Emerald with the flag. */
     fun attach(app: CoopApp, link: CoopLink?, romSha1: String?): Boolean {

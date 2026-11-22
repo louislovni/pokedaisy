@@ -1,6 +1,6 @@
 /* Co-op joined battles in the libretro core (Capsule's iPhone / PC builds; the app's is CoopLinkFlow.kt + CoopLinkBattle.kt +
  * CoopBattles.kt): a battle that starts near the partner is offered to them, and when they join it runs as Emerald's own link
- * battle in both games (the app's C bridge, pk_coop_link*.c, built for English and French Emerald: pd_coop_fr_names.h). The
+ * battle in both games (the app's C bridge, pk_coop_link*.c, built for English and French Emerald: pk_coop_fr_names.h). The
  * messages are the app's (CoopBattleWire.kt), byte for byte, so an iPhone and an Android play together. Included by
  * pd_libretro.c after pd_coop.inc (its partner presence gives the nearby rule). Wild, two-trainer and one-trainer battles;
  * story battles (gym leaders) are not offered from here yet.
@@ -20,7 +20,7 @@
 #include "pd_save.h"
 #include <time.h>
 
-/* The French cart's twins (pd_coop_fr_names.h renames every external name of pk_coop*.c: pk_coop_x -> pk_coopfr_x). */
+/* The French cart's twins (pk_coop_fr_names.h renames every external name of pk_coop*.c: pk_coop_x -> pk_coopfr_x). */
 int pk_coopfr_install(struct mCore *core);
 const char *pk_coopfr_refused(void);
 int pk_coopfr_link_install(struct mCore *core, pk_coop_call_fn call);
@@ -809,13 +809,25 @@ static bool cb_nearby(void) {
   return abs(dx) + abs(dy) <= CB_RANGE;
 }
 
+/* The story's trainers (gym leaders, the League, rivals...: CoopStory.isStoryTrainer, from CoopStoryGen.kt's events and
+ * trainer wins): one of them alone is never offered as an everyday battle, its badge / flag steps run by its own script. */
+static bool cb_story_trainer(int id) {
+  static const uint16_t ids[] = {30,  34,  261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 335, 519, 520,
+                                 521, 522, 523, 524, 525, 526, 527, 528, 529, 530, 531, 532, 533, 534, 535, 536, 537,
+                                 592, 593, 599, 600, 601, 602, 656, 657, 661, 662, 663, 664, 665, 666, 768, 769};
+  for (size_t i = 0; i < sizeof ids / sizeof ids[0]; i++)
+    if (ids[i] == id)
+      return true;
+  return false;
+}
+
 static void cb_offer_battle(void) {
   const struct coop_api *api = cb_api();
   int trainers[2] = {0, 0};
   api->join_trainers(core, trainers);
   int k = api->join_kind(core);
-  if (k == 4)
-    k = 0; /* a story trainer: not offered from here yet */
+  if (k == 4 || (k == 3 && cb_story_trainer(trainers[0])))
+    k = 0; /* a story trainer: not offered as an everyday battle (story joins are not offered from here yet) */
   bool may = k && cb_connected && cb.partnerReady && cb.partnerFree && cb_nearby() && cb.ready;
   char t[128];
   snprintf(t, sizeof t, "battle start held: kind %d, connected %d, partner ready %d free %d, nearby %d, self ready %d", k,

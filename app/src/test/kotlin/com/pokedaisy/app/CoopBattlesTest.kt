@@ -4,6 +4,7 @@ import com.pokedaisy.app.companion.coop.CoopLink
 import com.pokedaisy.app.companion.coop.CoopMessage
 import com.pokedaisy.app.companion.coop.CoopState
 import com.pokedaisy.app.companion.coop.EMERALD_COOP_SHA1
+import com.pokedaisy.app.companion.coop.EMERALD_FR_COOP_SHA1
 import com.pokedaisy.app.companion.data.FixtureMemoryReader
 import com.pokedaisy.app.companion.data.coop.CoopBattleChannel
 import com.pokedaisy.app.companion.data.coop.CoopBattleMsg
@@ -203,6 +204,7 @@ class CoopBattlesTest {
             override fun send(type: Int, payload: ByteArray) = false
         }
         assertTrue(CoopBattles.mayHook(EMERALD_COOP_SHA1, true, link))
+        assertTrue(CoopBattles.mayHook(EMERALD_FR_COOP_SHA1, true, link))   // French Emerald: the bridge's French build
         assertFalse(CoopBattles.mayHook("0000000000000000000000000000000000000000", true, link))
         assertFalse(CoopBattles.mayHook(null, true, link))
         assertFalse(CoopBattles.mayHook(EMERALD_COOP_SHA1, false, link))

@@ -26,7 +26,7 @@ get_target_property(MGBA_INC mgba_libretro INCLUDE_DIRECTORIES)
 list(FILTER MGBA_SRC EXCLUDE REGEX "platform/libretro/libretro\\.c$") # pd_libretro.c includes it, renamed
 set(APP ${CMAKE_CURRENT_SOURCE_DIR}/../app/src/main/cpp)
 # Co-op joined battles (Capsule's iPhone / PC): the app's C bridge, built twice - English Emerald's addresses, and French
-# Emerald's (pk_coop_emerald_fr.h pre-included, every external name renamed by pd_coop_fr_names.h): pd_coop_battle.inc picks.
+# Emerald's (pk_coop_emerald_fr.h pre-included, every external name renamed by pk_coop_fr_names.h: scripts/gen_coop_dispatch.py): pd_coop_battle.inc picks.
 set(COOP_SRC ${APP}/pk_coop.c ${APP}/pk_coop_after.c ${APP}/pk_coop_field.c ${APP}/pk_coop_link.c ${APP}/pk_coop_link_drop.c
   ${APP}/pk_coop_link_end.c ${APP}/pk_coop_link_rewards.c ${APP}/pk_coop_link_start.c ${APP}/pk_coop_link_story.c
   ${APP}/pk_coop_link_wild.c ${APP}/pk_coop_lock.c)
@@ -45,7 +45,7 @@ target_link_libraries(pokedaisy_gbc_libretro PRIVATE m)
 add_library(pd_coop_fr OBJECT ${COOP_SRC})
 set_target_properties(pd_coop_fr PROPERTIES COMPILE_DEFINITIONS "${MGBA_DEFS};${MGBA_DIR_DEFS};_GNU_SOURCE;PK_COOP_FR")
 target_include_directories(pd_coop_fr PRIVATE ${MGBA_INC} ${MGBA}/include ${CMAKE_CURRENT_BINARY_DIR}/mgba/include ${MGBA}/src ${APP})
-target_compile_options(pd_coop_fr PRIVATE "SHELL:-include ${APP}/pk_coop_emerald_fr.h" "SHELL:-include ${CMAKE_CURRENT_SOURCE_DIR}/pd_coop_fr_names.h")
+target_compile_options(pd_coop_fr PRIVATE "SHELL:-include ${APP}/pk_coop_emerald_fr.h" "SHELL:-include ${APP}/pk_coop_fr_names.h")
 # Only retro_* leaves the object: a second mGBA is resident beside the stock core (ADR-0006).
 if(NOT APPLE)
   target_link_options(pokedaisy_gbc_libretro PRIVATE -Wl,--exclude-libs,ALL -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/retro.map)
