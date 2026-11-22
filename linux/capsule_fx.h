@@ -533,4 +533,30 @@ static void fx_overlay(SDL_Renderer *r, SDL_Rect f, int fw, int fh, bool on, int
   SDL_RenderSetClipRect(r, NULL);
 }
 
+/* BATTLE SPRITES: the first Pokémon Black / White / Black 2 / White 2 cart (any language: header IRB? IRA? IRE? IRD?) in
+ * [dir], into [out]; false if none. */
+static bool fx_find_bw(const char *dir, char *out, size_t n) {
+  DIR *d = dir ? opendir(dir) : NULL;
+  struct dirent *e;
+  bool found = false;
+  while (d && !found && (e = readdir(d))) {
+    const char *ext = strrchr(e->d_name, '.');
+    if (!ext || strcasecmp(ext, ".nds"))
+      continue;
+    char path[PATH_MAX];
+    snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
+    FILE *f = fopen(path, "rb");
+    unsigned char h[16];
+    if (f && fread(h, 1, 16, f) == 16 && h[0xC] == 'I' && h[0xD] == 'R' && strchr("BAED", h[0xE]) && h[0xE]) {
+      snprintf(out, n, "%s", path);
+      found = true;
+    }
+    if (f)
+      fclose(f);
+  }
+  if (d)
+    closedir(d);
+  return found;
+}
+
 #endif

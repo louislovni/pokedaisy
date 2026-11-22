@@ -285,6 +285,14 @@ void pk_ride_info(char* out, int n);
 #define PK_WIDE_MB_ANIMATED_DOOR 0x69   /* MB_ANIMATED_DOOR (Emerald's and FireRed's) */
 int pk_wide_lights(int x0, int y0, int x1, int y1, int* out, int max);
 
+/** BATTLE SPRITES: the OAM entries drawing these tile numbers (a battle's Pokémon) are left out of the frames from the
+ * next on (n = 0: none); pk_wide_battle_seen gives where each was in the last frame: tile, centre x, y (GBA screen
+ * pixels), w, h, and its affine x / y scale (256 = 1), 7 ints an entry. A frontend draws its own pictures there.
+ * centres: per battler, its sprite's centre while the game keeps it invisible (0x7FFF, 0x7FFF while not, or NULL): a
+ * battle anim's copy of it on BG1 / BG2 there is left out of the frame and counted as seen too. */
+void pk_wide_battle_hide(const uint16_t* tiles, const int16_t* centres, int n);
+int pk_wide_battle_seen(int* out, int max);
+
 /** A game closed: FOLLOWER (its sprite, shown or not) and DAY AND NIGHT's tint go back to none, so the next game starts
  * without the last one's (they live here, not in the core, and the next game's engine starts from none). */
 void pk_wide_extras_reset(void);

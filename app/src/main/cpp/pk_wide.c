@@ -1051,6 +1051,113 @@ static void (*laterJoin)(void);
 static void menuHideBegin(struct GBAVideoRenderer* r);
 static void menuHideEnd(struct GBAVideoRenderer* r);
 
+// BATTLE SPRITES (pk_wide_battle_hide): the battlers' OAM entries left out of each frame (a frontend draws its own
+// pictures there), and where they were.
+static uint16_t bsTiles[4];
+static int16_t bsCentres[4][2];   // an invisible battler's sprite centre: a battle anim may have copied it to BG1 / BG2
+static int bsTileN;
+static uint16_t bsDispcnt;        // DISPCNT with a battler's BG copy left out (0: none this frame)
+static int bsOam[8], bsOamN;
+static uint16_t bsSavedAttr0[8];
+static int bsSeen[8][7], bsSeenN;   // tile, centre x, y, w, h, x / y scale (x256), last frame
+
+static void battleHideBegin(struct GBAVideoRenderer* r) {
+    bsOamN = 0;
+    bsSeenN = 0;
+    bsDispcnt = 0;
+    if (!bsTileN || !hookGba) return;
+    uint16_t* oam = hookGba->video.oam.raw;
+    // A battle anim's copy of a battler on BG1 / BG2 (MoveBattlerSpriteToBG: the sprite invisible, the BG scrolled so the
+    // copy's 64 x 64 sits where the sprite was): that layer left out, the copy's place kept.
+    const uint16_t* io = hookGba->memory.io;
+    uint16_t disp = io[0];
+    for (int k = 0; k < bsTileN && bsSeenN < 8; k++) {
+        if (bsCentres[k][0] == 0x7FFF) continue;
+        for (int bg = 1; bg <= 2; bg++) {
+            if (!(disp & (0x100 << bg))) continue;
+            int hofs = io[(0x10 + 4 * bg) >> 1] & 0x1FF, vofs = io[(0x12 + 4 * bg) >> 1] & 0x1FF;
+            int cx = ((512 - hofs) & 0x1FF) + 32, cy = ((256 - (vofs & 0xFF)) & 0xFF) + 32;
+            int dx = (cx - bsCentres[k][0]) & 0x1FF, dy = (cy - bsCentres[k][1]) & 0xFF;
+            if (dx > 256) dx -= 512;
+            if (dy > 128) dy -= 256;
+            if (abs(dx) > 24 || abs(dy) > 24) continue;
+            if (cx >= 256 + 64) cx -= 512;
+            if (cy >= 160 + 64) cy -= 256;
+            int* seen = bsSeen[bsSeenN++];
+            seen[0] = bsTiles[k];
+            seen[1] = cx;
+            seen[2] = cy;
+            seen[3] = seen[4] = 64;
+            seen[5] = seen[6] = 256;
+            disp &= (uint16_t) ~(0x100 << bg);
+            break;
+        }
+    }
+    if (disp != io[0] && r->writeVideoRegister) {
+        bsDispcnt = disp;
+        r->writeVideoRegister(r, 0, disp);
+    }
+    static const uint8_t sizes[3][4][2] = {{{8, 8}, {16, 16}, {32, 32}, {64, 64}}, {{16, 8}, {32, 8}, {32, 16}, {64, 32}},
+                                           {{8, 16}, {8, 32}, {16, 32}, {32, 64}}};
+    for (int i = 0; i < 128 && bsOamN < 8; i++) {
+        uint16_t a0 = oam[i * 4], a1 = oam[i * 4 + 1], a2 = oam[i * 4 + 2];
+        if ((a0 & 0x300) == 0x200 || (a0 >> 14) == 3) continue;   // off
+        int tile = a2 & 0x3FF, k;
+        for (k = 0; k < bsTileN && bsTiles[k] != tile; k++) {}
+        if (k == bsTileN) continue;
+        int w = sizes[a0 >> 14][a1 >> 14][0], h = sizes[a0 >> 14][a1 >> 14][1];
+        int x = a1 & 0x1FF, y = a0 & 0xFF;
+        if (x >= 240) x -= 512;
+        if (y >= 160) y -= 256;
+        int sx = 256, sy = 256;
+        if (a0 & 0x100) {
+            int g = (a1 >> 9) & 31;
+            int pa = (int16_t) oam[g * 16 + 3], pd = (int16_t) oam[g * 16 + 15];
+            sx = pa > 0 ? 65536 / pa : 256;
+            sy = pd > 0 ? 65536 / pd : 256;
+        }
+        bool dbl = (a0 & 0x300) == 0x300;
+        int* seen = bsSeen[bsSeenN++];
+        seen[0] = tile;
+        seen[1] = x + (dbl ? w : w / 2);
+        seen[2] = y + (dbl ? h : h / 2);
+        seen[3] = w;
+        seen[4] = h;
+        seen[5] = sx;
+        seen[6] = sy;
+        bsOam[bsOamN] = i;
+        bsSavedAttr0[bsOamN++] = a0;
+        oam[i * 4] = (uint16_t) ((a0 & ~0x300) | 0x200);
+        r->writeOAM(r, (uint32_t) i * 4);
+    }
+}
+
+static void battleHideEnd(struct GBAVideoRenderer* r) {
+    if (!hookGba) return;
+    if (bsDispcnt && r->writeVideoRegister) r->writeVideoRegister(r, 0, hookGba->memory.io[0]);
+    bsDispcnt = 0;
+    for (int k = 0; k < bsOamN; k++) {
+        hookGba->video.oam.raw[bsOam[k] * 4] = bsSavedAttr0[k];
+        r->writeOAM(r, (uint32_t) bsOam[k] * 4);
+    }
+    bsOamN = 0;
+}
+
+void pk_wide_battle_hide(const uint16_t* tiles, const int16_t* centres, int n) {
+    bsTileN = n < 0 ? 0 : n > 4 ? 4 : n;
+    for (int i = 0; i < bsTileN; i++) {
+        bsTiles[i] = tiles[i];
+        bsCentres[i][0] = centres ? centres[2 * i] : 0x7FFF;
+        bsCentres[i][1] = centres ? centres[2 * i + 1] : 0x7FFF;
+    }
+}
+
+int pk_wide_battle_seen(int* out, int max) {
+    int n = bsSeenN < max ? bsSeenN : max;
+    memcpy(out, bsSeen, (size_t) n * sizeof(bsSeen[0]));
+    return n;
+}
+
 static void hookDrawScanline(struct GBAVideoRenderer* r, int y) {
     if (y == 0) {
         if (laterJoin) laterJoin();
@@ -1072,12 +1179,13 @@ static void hookDrawScanline(struct GBAVideoRenderer* r, int y) {
             const uint16_t* oam = hookGba->video.oam.raw;
             // WIDE's record of the OAM leaves the follower's and the partner's entries out: they're not the game's.
             static uint16_t own[512];
-            if (followOam >= 0 || partnerOam >= 0 || flyOamN > 0) {
+            if (followOam >= 0 || partnerOam >= 0 || flyOamN > 0 || bsOamN > 0) {
                 memcpy(own, oam, sizeof(own));
                 for (int i = 0; i < flyOamN; i++) memcpy(&own[flyOam[i] * 4], flySaved[i], 4);
                 if (followOam >= 0) memcpy(&own[followOam * 4], followSavedOam, 8);
                 if (partnerOam >= 0) memcpy(&own[partnerOam * 4], partnerSavedOam[0], 8);
                 if (partnerBlobOam >= 0) memcpy(&own[partnerBlobOam * 4], partnerSavedOam[1], 8);
+                for (int k = 0; k < bsOamN; k++) own[bsOam[k] * 4] = bsSavedAttr0[k];
                 oam = own;
             }
             if (!lineOamN || (memcmp(oam, lineOamBuf[lineOamN - 1], sizeof(lineOamBuf[0])) && lineOamN < LINE_PALS))
@@ -1086,9 +1194,9 @@ static void hookDrawScanline(struct GBAVideoRenderer* r, int y) {
         }
         lineOamOf[y] = (uint8_t) (lineOamN - 1);
     }
-    if (y == 0) { followBegin(r); rideBegin(r); partnerBegin(r); flyBegin(r); menuHideBegin(r); }
+    if (y == 0) { followBegin(r); rideBegin(r); partnerBegin(r); flyBegin(r); menuHideBegin(r); battleHideBegin(r); }
     origDrawScanline(r, y);
-    if (y == PK_WIDE_H - 1) { menuHideEnd(r); flyEnd(r); partnerEnd(r); rideEnd(r); followEnd(r); }
+    if (y == PK_WIDE_H - 1) { battleHideEnd(r); menuHideEnd(r); flyEnd(r); partnerEnd(r); rideEnd(r); followEnd(r); }
 }
 
 static void hookScanlines(struct GBA* gba) {

@@ -197,6 +197,7 @@ static bool env_wrap(unsigned cmd, void *data) {
 
 /* ---- the frame: the canvas the frontend sees, and where the game and the overlays are drawn ---- */
 #define CANVAS_MAX_W 640
+#define BATTLE_MAX_W 1024 // BATTLE SPRITES: a battle's canvas, the game drawn 2x to 4x so the pictures keep their pixels
 #define CANVAS_MAX_H 1024 // Capsule: 480 upstream; a phone held upright shows EXPAND's map down its whole height, under
                           // its controls too
 #define MENU_MAX_H 480   // the companion's own layouts stay within the upstream canvas
@@ -491,7 +492,7 @@ static void area_taps(struct area_tap *t, int n, int src) {
  * pixels under it (alpha-weighted, so the menu's see-through parts don't darken its edges). Unlike nearest-neighbour
  * at 1.5x it keeps the pixel font's strokes even, softened instead of alternately one and two pixels wide. */
 static void blend_overlay_area(const uint32_t *px, int w, int h, uint32_t *scratch) {
-  static struct area_tap tx[CANVAS_MAX_W], ty[CANVAS_MAX_H];
+  static struct area_tap tx[BATTLE_MAX_W], ty[CANVAS_MAX_H];
   area_taps(tx, CW, w);
   area_taps(ty, CH, h);
   for (int y = 0; y < CH; y++)
@@ -1066,7 +1067,7 @@ static void choose_canvas(void) {
   menuH = CH = CHMAX;
   canvasScale = 1;
   if (PD_BE_IS_GBA()) {
-    CWMAX = CANVAS_MAX_W;
+    CWMAX = BATTLE_MAX_W;
     CHMAX = CANVAS_MAX_H;
   }
 }
@@ -1083,6 +1084,9 @@ static int want_canvas(void) {
 }
 
 /* Follow the aspect: when the wanted canvas differs, resize it and tell the frontend (it rescales to the new whole factor). */
+static void bs_after_run(void);
+static void bs_draw(void);
+static bool bs_wanted(void);
 static void canvas_update(bool notify) {
   int w = menuW, h = menuH, scale = 1;
   unsigned fw = gameW ? gameW : (unsigned)baseGW, fh = gameH ? gameH : (unsigned)baseGH;
@@ -1100,6 +1104,17 @@ static void canvas_update(bool notify) {
     scale = 2;
     w *= scale;
     h *= scale;
+  }
+  // BATTLE SPRITES: a battle drawn bigger, a whole scale, so the DS pictures over it stay sharp.
+  if (PD_BE_IS_GBA() && !COMPANION_OVER && !quickOpen && bs_wanted()) {
+    int k = 4;
+    while (k > 1 && (w * k > CWMAX || h * k > CHMAX))
+      k--;
+    if (k > 1) {
+      scale = k;
+      w *= k;
+      h *= k;
+    }
   }
   if (w == CW && h == CH && scale == canvasScale)
     return;
@@ -2134,6 +2149,7 @@ RETRO_API void retro_run(void) {
                       ? 1u << B : 0;
     PF_T(pa);
     mgba_retro_run();
+    bs_after_run();
     autoRunFlip = 0;
     if (freeFlight)
       pk_flight_tick(core);
@@ -2385,11 +2401,12 @@ RETRO_API void retro_run(void) {
         blend_overlay_area(ovPixels, qc.w, qc.h, ovScratch);
     }
   } else {
-    direct565 = messageFrames == 0;
+    direct565 = messageFrames == 0 && !bs_wanted();
     if (direct565)
       draw_game_fast();
     else
       draw_game();
+    bs_draw();
     const bool gb = PD_BE_IS_GB();
     hud_field_tick();
     if (settings.hud && game.cfg && host.hasHud && hudFieldFrames >= 20) {
@@ -2550,3 +2567,221 @@ RETRO_API int retro_pd_lights(float *out, int max) {
   return n;
 #endif
 }
+
+/* ---- BATTLE SPRITES (Capsule's build): Black / White's animated pictures in an Emerald battle (pd_bwsprite.c) ----
+ * The frontend names the player's own Black / White (2) cart (retro_pd_battle_sprites); each frame the battlers'
+ * sprites are found (gBattlerSpriteIds -> gSprites' tile number), their OAM entries left out of the next frame
+ * (pk_wide_battle_hide) and the cart's picture drawn where each was, standing on the same ground, at the game's scale. */
+#ifndef PD_ARMGBA
+#include "pd_bwsprite.h"
+
+#define BS_SPRITES 0x02020630u      /* gSprites (Emerald, every language but Japanese) */
+#define BS_SPRITE_IDS 0x020241E4u   /* gBattlerSpriteIds */
+static struct {
+  uint16_t tile;
+  int species, national;
+  bool back, shiny, on;
+  int t;                  /* frames since it came out */
+  int gap;                /* empty rows under the game's own picture (-1: not read yet) */
+  float rest;             /* its ground while standing (GBA y), to clip a faint's drop at */
+} bsMon[4];
+static bool bsActive; /* drawn over the last frame: the canvas takes the slow path */
+/* Which battler sprites show a Pokémon (a trainer's picture doesn't), by the anims SetMultiuseSpriteTemplateToPokemon
+ * gives them: a foe's gMonFrontAnimsPtrTable[species] (the table found in the ROM from a wild battle's foe, its first
+ * pointer that fits), the player's side gAnims_MonPic (learnt as the first anims there that aren't the trainer's back
+ * picture's, which a battle opens with). */
+static uint32_t bsFrontTable, bsMonBack, bsTrainerBack;
+static bool bsWasInBattle;
+
+static uint32_t bs_rom32(uint32_t a) {
+  uint32_t o = a - 0x08000000u;
+  if (!romData || a < 0x08000000u || o + 4 > romLen)
+    return 0;
+  return romData[o] | romData[o + 1] << 8 | romData[o + 2] << 16 | (uint32_t)romData[o + 3] << 24;
+}
+
+/* gMonFrontAnimsPtrTable from a foe known to be a Pokémon: [anims] at [species]'s entry, every entry a ROM pointer. */
+static void bs_find_front(uint32_t anims, int species) {
+  if (!romData || species < 1 || species > 411)
+    return;
+  for (size_t o = 0; o + 4 <= romLen; o += 4) {
+    if ((romData[o] | romData[o + 1] << 8 | romData[o + 2] << 16 | (uint32_t)romData[o + 3] << 24) != anims)
+      continue;
+    uint32_t base = 0x08000000u + (uint32_t)o - 4u * (uint32_t)species;
+    bool ok = true;
+    for (int i = 1; i <= 411 && ok; i++) {
+      uint32_t v = bs_rom32(base + 4u * (uint32_t)i);
+      ok = v >= 0x08000000u && v - 0x08000000u < romLen;
+    }
+    if (ok) {
+      bsFrontTable = base;
+      return;
+    }
+  }
+}
+static bool bs_wanted(void) {
+  for (int b = 0; b < 4; b++)
+    if (bsMon[b].on)
+      return true;
+  return bsActive;
+}
+
+RETRO_API void retro_pd_battle_sprites(const char *ndsPath) {
+  if (!ndsPath || !*ndsPath)
+    bws_close();
+  else
+    bws_open(ndsPath);
+}
+
+static bool bs_game(void) {
+  return bws_ready() && game.cfg && game.kind == PD_GAME_EMERALD && game.code[3] != 'J' && PD_BE_IS_GBA();
+}
+
+/* After the game ran a frame: which battlers to leave out of the next one. */
+static void bs_after_run(void) {
+  uint16_t tiles[4];
+  int16_t centres[8];
+  int n = 0;
+  uint8_t flags = 0, count = 0;
+  if (bs_game() && pd_lr_read_memory(core, game.cfg->gMain + 0x439, &flags, 1) && (flags & 2) &&
+      pd_lr_read_memory(core, game.cfg->battlersCount, &count, 1)) {
+    uint8_t ids[4], pos[4];
+    pd_lr_read_memory(core, BS_SPRITE_IDS, ids, 4);
+    pd_lr_read_memory(core, game.cfg->battlerPositions, pos, 4);
+    uint32_t anims[4] = {0};
+    for (int b = 0; b < 4 && b < count; b++) {
+      uint8_t a[4];
+      if (ids[b] < 64 && pd_lr_read_memory(core, BS_SPRITES + ids[b] * 0x44u + 8, a, 4))
+        anims[b] = a[0] | a[1] << 8 | a[2] << 16 | (uint32_t)a[3] << 24;
+    }
+    uint8_t type[4] = {0};
+    pd_lr_read_memory(core, game.cfg->battleTypeFlags, type, 4);
+    // A battle opens with the trainer's back picture on the player's side.
+    if (!bsWasInBattle)
+      for (int b = 0; b < count && b < 4; b++)
+        if (!(pos[b] & 1) && anims[b])
+          bsTrainerBack = anims[b];
+    bsWasInBattle = true;
+    for (int b = 0; b < count && b < 4; b++) {
+      uint8_t sp[2];
+      if (!anims[b] || (anims[b] >> 24) != 0x08 || !pd_lr_read_memory(core, game.cfg->battleMons + b * 0x58u, sp, 2))
+        continue;
+      if (!(pos[b] & 1) && !bsMonBack && bsTrainerBack && anims[b] != bsTrainerBack)
+        bsMonBack = anims[b];
+      if ((pos[b] & 1) && !bsFrontTable && !(type[0] & 0x08)) // a wild battle's foe is its Pokémon from the start
+        bs_find_front(anims[b], sp[0] | sp[1] << 8);
+    }
+    for (int b = 0; b < 4; b++) {
+      bsMon[b].on = false;
+      if (b >= count || ids[b] >= 64)
+        continue;
+      uint8_t spr[0x44], mon[0x58];
+      if (!pd_lr_read_memory(core, BS_SPRITES + ids[b] * 0x44u, spr, sizeof spr) ||
+          !pd_lr_read_memory(core, game.cfg->battleMons + b * 0x58u, mon, sizeof mon) || !(spr[0x3E] & 1))
+        continue;
+      uint32_t status2 = mon[0x50] | mon[0x51] << 8 | mon[0x52] << 16 | (uint32_t)mon[0x53] << 24;
+      if (status2 & (0x01000000u | 0x00200000u)) // behind a substitute, or transformed: the game's own picture
+        continue;
+      int species = mon[0] | mon[1] << 8;
+      bool isMon = pos[b] & 1 ? bsFrontTable && species > 0 && species <= 411 && anims[b] == bs_rom32(bsFrontTable + 4u * (uint32_t)species)
+                              : bsMonBack && anims[b] == bsMonBack;
+      if (!isMon) // a trainer's picture (the battle's start), or not known yet
+        continue;
+      int national = species > 0 ? pd_dex_national(&game, species) : 0;
+      if (national < 1 || national > 649)
+        continue;
+      uint16_t tile = (uint16_t)((spr[4] | spr[5] << 8) & 0x3FF);
+      if (tile != bsMon[b].tile || species != bsMon[b].species) {
+        bsMon[b].tile = tile;
+        bsMon[b].species = species;
+        bsMon[b].t = 0;
+        bsMon[b].gap = -1;
+        bsMon[b].rest = -1;
+      }
+      uint32_t p = mon[0x48] | mon[0x49] << 8 | mon[0x4A] << 16 | (uint32_t)mon[0x4B] << 24;
+      uint32_t ot = mon[0x54] | mon[0x55] << 8 | mon[0x56] << 16 | (uint32_t)mon[0x57] << 24;
+      bsMon[b].shiny = ((ot >> 16) ^ (ot & 0xFFFF) ^ (p >> 16) ^ (p & 0xFFFF)) < 8;
+      bsMon[b].national = national;
+      bsMon[b].back = !(pos[b] & 1);
+      if (bsMon[b].gap < 0) {
+        // The game's picture's lowest row: where its Pokémon stands (64 x 64, 4bpp, 1D).
+        uint8_t px[2048];
+        if (pd_lr_read_memory(core, 0x06010000u + tile * 32u, px, sizeof px)) {
+          for (int row = 63; row >= 0 && bsMon[b].gap < 0; row--)
+            for (int tx = 0; tx < 8; tx++) {
+              const uint8_t *t = px + ((row / 8) * 8 + tx) * 32 + (row % 8) * 4;
+              if (t[0] | t[1] | t[2] | t[3]) {
+                bsMon[b].gap = 63 - row;
+                break;
+              }
+            }
+        }
+      }
+      if (bsMon[b].gap < 0)
+        continue;
+      bsMon[b].on = true;
+      bsMon[b].t++;
+      bool invisible = spr[0x3E] & 4;
+      centres[2 * n] = invisible ? (int16_t)((spr[0x20] | spr[0x21] << 8) + (spr[0x24] | spr[0x25] << 8)) : 0x7FFF;
+      centres[2 * n + 1] = invisible ? (int16_t)((spr[0x22] | spr[0x23] << 8) + (spr[0x26] | spr[0x27] << 8)) : 0x7FFF;
+      tiles[n++] = tile;
+    }
+  } else {
+    for (int b = 0; b < 4; b++)
+      bsMon[b].on = false;
+    bsWasInBattle = false;
+  }
+  pk_wide_battle_hide(tiles, centres, n);
+}
+
+/* Over the canvas (after draw_game): the pictures where the game's were in the frame just drawn. */
+static void bs_draw(void) {
+  bsActive = false;
+  if (!bs_game())
+    return;
+  int seen[8 * 7];
+  int n = pk_wide_battle_seen(seen, 8);
+  if (!n)
+    return;
+  // The GBA screen's pixels -> the canvas (as retro_pd_lights): EXPAND's window in the middle at its scale, else the frame.
+  int scale, ox, oy;
+  if (wideReady) {
+    scale = game_scale(wideW, wideH);
+    ox = (CW - (int)wideW * scale) / 2 + ((int)wideW - 240) / 2 * scale;
+    oy = (CH - (int)wideH * scale) / 2 + ((int)wideH - 160) / 2 * scale;
+  } else {
+    scale = game_scale(gameW, gameH);
+    ox = (CW - (int)gameW * scale) / 2;
+    oy = (CH - (int)gameH * scale) / 2;
+  }
+  for (int i = 0; i < n; i++) {
+    const int *e = seen + 7 * i;
+    int b;
+    for (b = 0; b < 4 && !(bsMon[b].on && bsMon[b].tile == e[0]); b++) {
+    }
+    if (b == 4)
+      continue;
+    float sx = e[5] / 256.0f, sy = e[6] / 256.0f;
+    // Its ground: the game's picture's lowest row, as scaled round the sprite's middle.
+    float ground = (float)e[2] + ((float)e[4] / 2 - (float)bsMon[b].gap) * sy;
+    if (bsMon[b].rest < 0 && sx > 0.99f && sy > 0.99f)
+      bsMon[b].rest = ground;
+    float bottom = bsMon[b].rest >= 0 ? bsMon[b].rest + 1 : 160;
+    if (bsMon[b].back && bottom > 112)
+      bottom = 112; // the player's own stands on the text box
+    int clip[4] = {0, 0, CW, oy + (int)(bottom * scale)};
+    if (clip[3] > CH)
+      clip[3] = CH;
+    // A DS pixel a GBA pixel for the foe; the player's own from behind half as big again (the DS games draw it 2x).
+    float s = scale * (bsMon[b].back ? 1.5f : 1.0f) * (sx < sy ? sx : sy);
+    if (bws_draw(bsMon[b].national, bsMon[b].back, bsMon[b].shiny, bsMon[b].t, cvs, CW, clip, ox + e[1] * scale,
+                 oy + ground * scale, s))
+      bsActive = true;
+  }
+}
+#else
+RETRO_API void retro_pd_battle_sprites(const char *ndsPath) { (void)ndsPath; }
+static void bs_after_run(void) {}
+static void bs_draw(void) {}
+static bool bs_wanted(void) { return false; }
+#endif
