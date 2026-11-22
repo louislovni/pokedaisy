@@ -2585,8 +2585,10 @@ static struct {
   bool back, shiny, on;
   int t;                  /* frames since it came out */
   int gap;                /* empty rows under the game's own picture (-1: not read yet) */
-  float rest;             /* its ground while standing (GBA y), to clip a faint's drop at */
+  float rest;             /* its ground while standing (GBA y), to clip a faint's drop at; a foe's: its centre */
+  int pos;                /* its battler position (sBattlerCoords) */
 } bsMon[4];
+static bool bsDouble;
 static bool bsActive; /* drawn over the last frame: the canvas takes the slow path */
 /* Which battler sprites show a Pokémon (a trainer's picture doesn't), by the anims SetMultiuseSpriteTemplateToPokemon
  * gives them: a foe's gMonFrontAnimsPtrTable[species] (the table found in the ROM from a wild battle's foe, its first
@@ -2719,6 +2721,8 @@ static void bs_after_run(void) {
       bsMon[b].shiny = ((ot >> 16) ^ (ot & 0xFFFF) ^ (p >> 16) ^ (p & 0xFFFF)) < 8;
       bsMon[b].national = national;
       bsMon[b].back = !(pos[b] & 1);
+      bsMon[b].pos = pos[b] & 3;
+      bsDouble = type[0] & 1;
       if (!bws_has(national, bsMon[b].back))
         continue;
       if (bsMon[b].gap < 0) {
@@ -2782,9 +2786,22 @@ static void bs_draw(void) {
     float sx = e[5] / 256.0f, sy = e[6] / 256.0f;
     // Its ground: the game's picture's lowest row, as scaled round the sprite's middle.
     float ground = (float)e[2] + ((float)e[4] / 2 - (float)bsMon[b].gap) * sy;
-    if (bsMon[b].rest < 0 && sx > 0.99f && sy > 0.99f)
-      bsMon[b].rest = ground;
-    float bottom = bsMon[b].rest >= 0 ? bsMon[b].rest + 1 : 160;
+    float bottom;
+    if (bsMon[b].back) {
+      if (bsMon[b].rest < 0 && sx > 0.99f && sy > 0.99f)
+        bsMon[b].rest = ground;
+      bottom = bsMon[b].rest >= 0 ? bsMon[b].rest + 1 : 160;
+    } else {
+      // A foe stands on its place's ground (sBattlerCoords' y + 32): the game lifts a flying one's picture
+      // (gEnemyMonElevation), the DS picture flies by itself. Moved as far as the game's sprite has from where it rests.
+      static const int baseY[2][4] = {{80, 40, 40, 80}, {80, 40, 88, 32}};
+      float g0 = (float)(baseY[bsDouble][bsMon[b].pos] + 32);
+      if (bsMon[b].rest < 0 && sx > 0.99f && sy > 0.99f)
+        bsMon[b].rest = (float)e[2];
+      float moved = bsMon[b].rest >= 0 ? (float)e[2] - bsMon[b].rest : 0;
+      ground = g0 + moved;
+      bottom = g0 + 1;
+    }
     if (bsMon[b].back && bottom > 112)
       bottom = 112; // the player's own stands on the text box
     int clip[4] = {0, 0, CW, oy + (int)(bottom * scale)};
