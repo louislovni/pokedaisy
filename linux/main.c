@@ -455,7 +455,9 @@ static struct {
   int dsHotkey[HK_ACTIONS];
   int modifier;
   bool capsuleFrame; // CAPSULE FRAME (Capsule's build): the game in a bezel over a gradient of its colours, not black bars
-} hostSet = {0, false, false, false, {R2, L2, -1, -1}, {R2, L2, -1, -1}, SELECT, true};
+  int look;          // LOOK (Capsule's build, capsule_fx.h): ORIGINAL / SMOOTH HD / CRT / REMASTER
+  bool weatherFx;    // WEATHER AND LIGHTS (Capsule's build, capsule_fx.h)
+} hostSet = {0, false, false, false, {R2, L2, -1, -1}, {R2, L2, -1, -1}, SELECT, true, 0, true};
 static char hostIni[PATH_MAX];
 /* A DS game's L2 / R2 are its companion and screen buttons: with no modifier held for them, its FAST FORWARD and REWIND
  * go back to the stick clicks (R3 / L3), and come back to R2 / L2 when a modifier is picked again. */
@@ -492,6 +494,10 @@ static void host_load(void) {
       hostSet.lcd = v != 0;
     if (sscanf(line, "capsule_frame=%d", &v) == 1)
       hostSet.capsuleFrame = v != 0;
+    if (sscanf(line, "look=%d", &v) == 1)
+      hostSet.look = v >= 0 && v < 4 ? v : 0;
+    if (sscanf(line, "weather_fx=%d", &v) == 1)
+      hostSet.weatherFx = v != 0;
     if (sscanf(line, "swap_ab=%d", &v) == 1)
       hostSet.swapAB = v != 0;
     char modifier[16];
@@ -527,6 +533,7 @@ static void host_save(void) {
     return;
   fprintf(f, "ff_speed=%d\nrewind=%d\nlcd=%d\nswap_ab=%d\ncapsule_frame=%d\n", hostSet.ffSpeed, hostSet.rewind, hostSet.lcd,
           hostSet.swapAB, hostSet.capsuleFrame);
+  fprintf(f, "look=%d\nweather_fx=%d\n", hostSet.look, hostSet.weatherFx);
   fprintf(f, "hk_modifier=%s\n", key_name(hostSet.modifier));
   for (int i = 0; i < HK_ACTIONS; i++) {
     fprintf(f, "hk_%s=%s\n", hotkeyIds[i], key_name(hostSet.hotkey[i]));
@@ -920,6 +927,7 @@ static bool environment(unsigned cmd, void *data) {
 #ifdef POCKET_PURE
 #include "capsule_frame.h"
 #define CAPSULE_FRAME_ON hostSet.capsuleFrame
+#include "capsule_fx.h"
 #else
 #define CAPSULE_FRAME_ON false
 #endif
@@ -932,6 +940,9 @@ static void video_refresh(const void *data, unsigned w, unsigned h, size_t pitch
 #endif
   SDL_Rect r = {0, 0, (int)w, (int)h};
   SDL_UpdateTexture(frameTexture, &r, data, (int)pitch);
+#ifdef POCKET_PURE
+  fx_frame(renderer, data, w, h, pitch, pixelFormat, hostSet.look);
+#endif
   frameW = (int)w;
   frameH = (int)h;
 }
@@ -1051,10 +1062,20 @@ static void present_game(const struct pd_menu *menu) {
   if (CAPSULE_FRAME_ON && frameW > 0)
     capsule_frame_draw(renderer, frameRect, ow, oh);
 #endif
+#ifdef POCKET_PURE
+  if (frameW > 0)
+    fx_before_frame(frameTexture, hostSet.weatherFx);
+  if (frameW > 0 && fx_draw_frame(renderer, frameRect)) {
+  } else
+#endif
   if (frameTexture && frameW > 0) {
     SDL_Rect src = {0, 0, frameW, frameH};
     SDL_RenderCopy(renderer, frameTexture, &src, &frameRect);
   }
+#ifdef POCKET_PURE
+  if (frameW > 0)
+    fx_overlay(renderer, frameRect, frameW, frameH, hostSet.weatherFx, hostSet.look);
+#endif
   render_lcd();
   bool any = false;
   overlay_begin();
@@ -1493,7 +1514,8 @@ extern int pd_ds_run(const char *, const char *, int, const char *, SDL_Renderer
 static bool ds_running(void) { return running != 0; }
 #endif
 // The host menu's rows, top to bottom (fast-forward is the FAST FORWARD hotkey's, held).
-enum { M_RESUME, M_SAVE, M_LOAD, M_HISTORY, M_COOP, M_HOTKEYS, M_REWIND, M_FFSPEED, M_LCD, M_FRAME, M_SWAP, M_QUIT, M_COUNT };
+enum { M_RESUME, M_SAVE, M_LOAD, M_HISTORY, M_COOP, M_HOTKEYS, M_REWIND, M_FFSPEED, M_LOOK, M_WEATHER, M_LCD, M_FRAME, M_SWAP, M_QUIT,
+       M_COUNT };
 /* SAVE HISTORY (the host menu, Capsule's build): the save's backups to go back to, newest first, by date. A pick asks
  * first; then the game closes (its progress written and backed up like any other, so going back can be undone), the
  * backup becomes the save and the game opens again on it. */
@@ -1730,6 +1752,10 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     if (language)
       language(host_language());
   }
+#ifdef POCKET_PURE
+  // LOOK / WEATHER AND LIGHTS: what the scene is and where the night's lights are (the GBA core's, else none).
+  fx_core((int (*)(int *, int))dlsym(core.dl, "retro_pd_scene"), (int (*)(float *, int))dlsym(core.dl, "retro_pd_lights"));
+#endif
 #ifdef CAPSULE_COOP
   if (!dsGame) {
     // The core's co-op presence (pd_libretro.c), if it has it: Capsule's JOUER A DEUX for Emerald.
@@ -1798,6 +1824,10 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     snprintf(rows[M_REWIND], 40, "REWIND  %s", hostSet.rewind ? "ON" : "OFF");
     snprintf(rows[M_LCD], 40, "LCD FILTER  %s", hostSet.lcd ? "ON" : "OFF");
     snprintf(rows[M_FRAME], 40, "CAPSULE FRAME  %s", hostSet.capsuleFrame ? "ON" : "OFF");
+#ifdef POCKET_PURE
+    snprintf(rows[M_LOOK], 40, "%s", fxLookRows[hostSet.look]);
+#endif
+    snprintf(rows[M_WEATHER], 40, "WEATHER AND LIGHTS  %s", hostSet.weatherFx ? "ON" : "OFF");
     snprintf(rows[M_SWAP], 40, "A/B BUTTONS  %s", hostSet.swapAB ? "SWAPPED" : "NORMAL");
     snprintf(rows[M_HOTKEYS], 40, "HOTKEYS");
     snprintf(rows[M_HISTORY], 40, "SAVE HISTORY");
@@ -1813,7 +1843,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     for (int i = 0; i < M_COUNT; i++) {
       if (pure && (i == M_SAVE || i == M_LOAD || i == M_REWIND))
         continue;
-      if (!pure && (i == M_FRAME || i == M_HISTORY)) // Capsule's build only
+      if (!pure && (i == M_FRAME || i == M_HISTORY || i == M_LOOK || i == M_WEATHER)) // Capsule's build only
         continue;
       if (i == M_COOP && !coopRow)
         continue;
@@ -2040,6 +2070,14 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
           break;
         case M_FRAME:
           hostSet.capsuleFrame = !hostSet.capsuleFrame;
+          host_save();
+          break;
+        case M_LOOK:
+          hostSet.look = (hostSet.look + 1) % 4;
+          host_save();
+          break;
+        case M_WEATHER:
+          hostSet.weatherFx = !hostSet.weatherFx;
           host_save();
           break;
         case M_SWAP:
