@@ -22,8 +22,16 @@ import kotlinx.coroutines.delay
  * (CoopBattles) fills it from the emu thread (Compose state tolerates that) and takes the answers back through the callbacks.
  * Nothing here talks to the game.
  */
+/** The co-op trade window (CoopTrade.kt): a title, its rows (the cursor on [sel], -1 = none) and the seconds left to answer. */
+data class CoopTradeScreen(val title: String, val rows: List<String>, val sel: Int, val secondsLeft: Int?)
+
 class CoopOverlayState {
     var join by mutableStateOf<CoopJoinPromptState?>(null)
+    /** A co-op trade's window, while one is open. */
+    var trade by mutableStateOf<CoopTradeScreen?>(null)
+    var onTradeKey: (MenuKey) -> Unit = {}
+    var onTradeRow: (Int) -> Unit = {}
+    var onTradeBack: () -> Unit = {}
     /** (partner's name, seconds left) while the host waits for an answer. */
     private var hostWaitState by mutableStateOf<Pair<String, Int>?>(null)
     private var hostWaitSince = 0L
@@ -43,12 +51,16 @@ class CoopOverlayState {
     var onCancelAsk: () -> Unit = {}
 
     /** Something is up that takes the game's buttons. */
-    val takesKeys: Boolean get() = join != null || hostWait != null
+    val takesKeys: Boolean get() = trade != null || join != null || hostWait != null
 
     fun showNotice(text: String) { notice = text; noticeToken++ }
 
     /** A game button while [takesKeys] (UI thread): the prompt's or the wait's. True = used. */
     fun key(k: MenuKey): Boolean {
+        if (trade != null) {
+            onTradeKey(k)
+            return true
+        }
         join?.let { j ->
             when (k) {
                 MenuKey.UP, MenuKey.DOWN -> j.cursorJoin = !j.cursorJoin
@@ -78,6 +90,11 @@ fun CoopBattleOverlays(state: CoopOverlayState) {
     val click = LocalClickSound.current
     androidx.compose.runtime.SideEffect { state.onSound = click }
     BoxWithConstraints(Modifier.fillMaxSize()) {
+        state.trade?.let { t ->
+            Box(Modifier.align(Alignment.Center).fillMaxWidth(0.6f).fillMaxHeight(0.9f)) {
+                CoopTradeWindow(t, onRow = state.onTradeRow, onBack = state.onTradeBack)
+            }
+        }
         state.join?.let { j ->
             Box(Modifier.align(Alignment.Center).fillMaxWidth(0.6f).fillMaxHeight(0.7f)) {
                 CoopJoinPrompt(j, onJoin = state.onJoin, onDecline = state.onDecline)

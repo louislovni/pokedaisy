@@ -2973,13 +2973,13 @@ story part (`libretro/pd_coop_story_spots.h` from `scripts/gen_coop_story_spots.
 (`pk_coop_link_start_ids` for STORY too, B = A for one trainer); the stand-in Frontier ids 0 / 1 showed a nameless HIKER with that
 trainer's AI.
 
-**Co-op trades (the libretro core only, Capsule's iPhone / PC builds)**: the QUICK MENU's TRADE (`libretro/pd_coop_trade.inc`), on
+**Co-op trades (the libretro core for Capsule's iPhone / PC builds, and the Android app)**: the QUICK MENU's TRADE (`libretro/pd_coop_trade.inc`), on
 co-op Emerald with the partner linked and free. Both games are held while the players choose: the initiator picks a party Pokémon
 (ASK 0x0220), the partner one of theirs or no (REPLY 0x0221), the initiator confirms (CONFIRM 0x0222). The partner then writes the
 other's record into its slot (`pk_coop_trade_mon`: the 100 bytes as they came, OT kept, the species SEEN / CAUGHT), saves and sends
 DONE (0x0223, resent until ACK 0x0224); the initiator does the same on DONE, however late (kept in memory). Each side checks the
 record (the joined battles' `cb_mon_ok`) and that its own slot still holds what it offered; a trade evolution follows
-(`pk_coop_evolve_trade`, EVO_MODE_TRADE) and a second save. The Android app has no trades: it drops these messages, so an ask times out.
+(`pk_coop_evolve_trade`, EVO_MODE_TRADE) and a second save. The Android app does the same (`CoopTrade.kt`'s `CoopTradeFlow`, run by the battle glue; QUICK MENU > TRADE, `MgbaCore.pkCoopTradeMon` / `pkCoopEvolveTrade`), byte for byte, so the two trade together.
 
 ### The link bridge (a joined battle as a link battle)
 

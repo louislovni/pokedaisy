@@ -1,6 +1,6 @@
-/* Co-op trades from the QUICK MENU (Capsule: iPhone / PC; the Android app has none yet): two linked players on Emerald each give
+/* Co-op trades from the QUICK MENU (Capsule: iPhone / PC; the Android app's CoopTrade.kt is the same flow): two linked players on Emerald each give
  * one party Pokémon for one of the other's, both games held while they choose. Included by pd_coop_battle.inc (its link, its
- * checks and its free-field ops); the messages are Capsule's own (0x0220-0x0225; the Android app drops them).
+ * checks and its free-field ops); the messages are 0x0220-0x0225, the same as the Android app's.
  *
  *   initiator                         partner
  *   PICK  --- ASK (its Pokémon) --->  OFFERED (picks one of its own, or says no)
@@ -349,7 +349,7 @@ static void tr_tick(void) {
     break;
   case TRP_ASKED:
     if (cbNow - tr.phaseAt >= TR_ANSWER_MS)
-      tr_cancel(true, "NO ANSWER. YOUR PARTNER NEEDS CAPSULE TO TRADE.");
+      tr_cancel(true, "NO ANSWER FROM YOUR PARTNER.");
     else if (down(B))
       tr_cancel(true, NULL);
     break;

@@ -1189,7 +1189,7 @@ const struct pd_tr_entry pd_tr_fr[2449] = {
     { "NO", "NON" },
     { "NO ACCOUNT? SIGN UP", "PAS DE COMPTE ? S'INSCRIRE" },
     { "NO ACHIEVEMENTS FOR THIS ROM", "AUCUN SUCCÈS POUR CETTE ROM" },
-    { "NO ANSWER. YOUR PARTNER NEEDS CAPSULE TO TRADE.", "PAS DE RÉPONSE. IL FAUT CAPSULE DES DEUX CÔTÉS." },
+    { "NO ANSWER FROM YOUR PARTNER.", "PAS DE RÉPONSE DU PARTENAIRE." },
     { "NO API KEY", "PAS DE CLÉ API" },
     { "NO BAG YET", "PAS ENCORE DE SAC" },
     { "NO BATTLE", "PAS DE COMBAT" },
@@ -2454,7 +2454,7 @@ const struct pd_tr_entry pd_tr_fr[2449] = {
 };
 const int pd_tr_fr_count = 2449;
 
-const struct pd_tr_entry pd_tr_fr_formats[388] = {
+const struct pd_tr_entry pd_tr_fr_formats[391] = {
     { "A frame around the game. %s and %s are PokéDaisy's own. %s adds yours: a RetroArch overlay (.cfg with its PNG), a .zip of them, or a PNG with a see-through screen.", "Un cadre autour du jeu. {0} et {1} sont ceux de PokéDaisy. {2} ajoute les vôtres : une surimpression RetroArch (.cfg avec son PNG), un .zip de celles-ci, ou un PNG avec un écran transparent." },
     { "This patch is for a %s ROM with CRC32 %s, and no ROM in your library has that checksum. Add that ROM to your library or a ROMs folder, then try again.", "Ce patch est pour une ROM de {0} au CRC32 {1}, et aucune ROM de votre bibliothèque n'a cette somme de contrôle. Ajoutez cette ROM à votre bibliothèque ou à un dossier de ROM, puis réessayez." },
     { "This patch is for %s (CRC32 %s), and no ROM in your library has that checksum. Add that ROM to your library or a ROMs folder, then try again.", "Ce patch est pour {0} (CRC32 {1}), et aucune ROM de votre bibliothèque n'a cette somme de contrôle. Ajoutez cette ROM à votre bibliothèque ou à un dossier de ROM, puis réessayez." },
@@ -2684,6 +2684,7 @@ const struct pd_tr_entry pd_tr_fr_formats[388] = {
     { "%s FILE(S) · %s", "{0} FICHIER(S) · {1}" },
     { "%s in the party", "{0} dans l'équipe" },
     { "%s's PC is full", "Le PC de {0} est plein" },
+    { "GIVE %s FOR %s?", "DONNER {0} CONTRE {1} ?" },
     { "SEEN %d  OWN %d", "VUS {0}  PRIS {1}" },
     { "SIGNED IN AS %s", "CONNECTÉ EN TANT QUE {0}" },
     { "Slot %s (empty)", "Emplacement {0} (vide)" },
@@ -2723,6 +2724,7 @@ const struct pd_tr_entry pd_tr_fr_formats[388] = {
     { "walk %s steps", "marcher {0} pas" },
     { "%s (matches)", "{0} (correspond)" },
     { "%s IS BETTER", "{0} EST MIEUX" },
+    { "%s OFFERS %s", "{0} PROPOSE {1}" },
     { "%s · RANK %s", "{0} · RANG {1}" },
     { "Base ROM: %s", "ROM d'origine : {0}" },
     { "Bye-bye, %s!", "Bye-bye, {0} !" },
@@ -2803,6 +2805,7 @@ const struct pd_tr_entry pd_tr_fr_formats[388] = {
     { "knows %s", "connaît {0}" },
     { "%d TABS", "{0} ONGLETS" },
     { "%s Lv%d", "{0} N.{1}" },
+    { "%s Lv%s", "{0} N.{1}" },
     { "%s TABS", "{0} ONGLETS" },
     { "%s TYPE", "TYPE {0}" },
     { "%s · PC", "{0} · PC" },
@@ -2844,4 +2847,4 @@ const struct pd_tr_entry pd_tr_fr_formats[388] = {
     { "Lv%d", "N.{0}" },
     { "Lv%s", "N.{0}" },
 };
-const int pd_tr_fr_format_count = 388;
+const int pd_tr_fr_format_count = 391;

@@ -1605,6 +1605,22 @@ JNIEXPORT jint JNICALL
 Java_com_pokedaisy_app_MgbaCore_pkCoopSaveGame(JNIEnv* env, jobject thiz) {
     COOP_AFTER_GUARD(pk_coop_save_game(g.core))
 }
+
+// Co-op trades (CoopTrade.kt): the partner's record into party slot `slot`, its own OT kept, the species dexed.
+JNIEXPORT jint JNICALL
+Java_com_pokedaisy_app_MgbaCore_pkCoopTradeMon(JNIEnv* env, jobject thiz, jint slot, jbyteArray jMon) {
+    if (!jMon || (*env)->GetArrayLength(env, jMon) != 100) {
+        return 0;
+    }
+    uint8_t mon[100];
+    (*env)->GetByteArrayRegion(env, jMon, 0, 100, (jbyte*) mon);
+    COOP_AFTER_GUARD(pk_coop_trade_mon(g.core, slot, mon))
+}
+
+JNIEXPORT jint JNICALL
+Java_com_pokedaisy_app_MgbaCore_pkCoopEvolveTrade(JNIEnv* env, jobject thiz, jint slot) {
+    COOP_AFTER_GUARD(pk_coop_evolve_trade(g.core, slot))
+}
 // Emu thread: the 32-byte palettes in `from` (back to back) swapped for `to` wherever the
 // game has one loaded (pk_cheats_repalette). Returns how many.
 JNIEXPORT jint JNICALL

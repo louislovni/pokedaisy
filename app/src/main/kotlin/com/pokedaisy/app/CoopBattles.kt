@@ -97,6 +97,8 @@ class CoopBattleGlue(
     private val stopWaitMs: Long = STOP_WAIT_MS,
     /** The native link bridge: every joined battle runs through it ([flow]). */
     private val linkEngine: CoopLinkEngine,
+    /** The game for co-op trades (CoopTrade.kt); null = no trades. */
+    tradeGame: CoopTradeGame? = null,
 ) : CoopFrameHook {
     private val joinState = CoopJoinPromptState()
 
@@ -137,6 +139,11 @@ class CoopBattleGlue(
         store = env.catchStore() ?: com.pokedaisy.app.companion.data.coop.MemoryCatchStore(),
     )
 
+    /** The QUICK MENU's co-op trades, over the same link ([CoopTradeFlow.TYPES]). */
+    val trade: CoopTradeFlow? = tradeGame?.let { g ->
+        CoopTradeFlow(channel, g, clock, { env.partnerName() }, { ui.trade = it }, { ui.showNotice(it) }, { env.log(it) })
+    }
+
     @Volatile private var stopping = false
     private var ready = false
     private var lastStatus = -STATUS_MS
@@ -149,20 +156,28 @@ class CoopBattleGlue(
     /** From the offer's hold (host) / the answered prompt (partner) to the results saved. */
     val busy: Boolean get() = flow.busy
 
+    /** A co-op trade is under way (its window, its saves, a commit waiting for the partner). */
+    val tradeBusy: Boolean get() = trade?.busy == true
+
     /** LOAD STATE and its kin are refused while a co-op battle runs (CoopGuards says the same to the engine). */
-    fun loadStateBlocked(): Boolean = busy
+    fun loadStateBlocked(): Boolean = busy || tradeBusy
 
     init {
         ui.onJoin = { emu.post { flow.answerPrompt(true) } }
         ui.onDecline = { emu.post { flow.answerPrompt(false) } }
         ui.onCancelAsk = { emu.post { flow.cancelAsking() } }
+        ui.onTradeKey = { k -> emu.post { if (!stopping) trade?.key(k) } }
+        ui.onTradeRow = { i -> emu.post { if (!stopping) trade?.pick(i) } }
+        ui.onTradeBack = { emu.post { if (!stopping) trade?.back() } }
     }
 
     // --- messages and the link: arrive on the link's thread, handled on the emu thread ---
 
     /** One battle message from the link ([type] 0x0200-0x02FF); anything undecodable is dropped. */
     fun onReceived(type: Int, payload: ByteArray) {
+        if (type in CoopTradeFlow.TYPES) { emu.post { if (!stopping) trade?.onMessage(type, payload) }; return }
         val m = CoopBattleWire.decode(type, payload) ?: return
+        if (m is CoopBattleMsg.Status) emu.post { trade?.partnerFree = m.free }
         if (m is CoopBattleMsg.LinkBlock) { flow.onMessage(m); return }   // thread-safe queue, drained on the emu thread
         emu.post { if (!stopping) flow.onMessage(m) }
     }
@@ -172,7 +187,7 @@ class CoopBattleGlue(
 
     fun onLinkState(connected: Boolean) {
         linkUp = connected
-        emu.post { if (!stopping) flow.linkChanged(connected) }
+        emu.post { if (!stopping) { flow.linkChanged(connected); trade?.linkChanged(connected) } }
     }
 
     // --- the frame hook ---
@@ -188,6 +203,7 @@ class CoopBattleGlue(
         status(now)
         // The link battle runs the game on its own keys: the player's, always.
         flow.beforeFrame()
+        trade?.tick()
         syncGuards()
         return keys
     }
@@ -223,8 +239,9 @@ class CoopBattleGlue(
 
     private fun syncGuards() {
         CoopGuards.hold(CoopGuards.Hold.BATTLE, flow.holdGame)
+        CoopGuards.hold(CoopGuards.Hold.TRADE, trade?.hold == true)
         val b = busy
-        CoopGuards.blockStates(CoopGuards.StateBlock.BATTLE, b || flow.armed)
+        CoopGuards.blockStates(CoopGuards.StateBlock.BATTLE, b || flow.armed || tradeBusy)
         if (b != busyNow) { busyNow = b; env.busyChanged(b) }
     }
 
@@ -238,7 +255,7 @@ class CoopBattleGlue(
         stopping = true
         val wasBusy = busy
         val job = {
-            try { flow.stopNow(); clearOverlays(); syncGuards() }
+            try { flow.stopNow(); trade?.stopNow(); clearOverlays(); syncGuards() }
             catch (t: Throwable) { stopOk = false; env.log("stop failed: $t") }
         }
         if (!emu.running) { job(); return stopOk }
@@ -260,12 +277,13 @@ class CoopBattleGlue(
     fun release() {
         clearOverlays()
         CoopGuards.hold(CoopGuards.Hold.BATTLE, false)
+        CoopGuards.hold(CoopGuards.Hold.TRADE, false)
         CoopGuards.blockStates(CoopGuards.StateBlock.BATTLE, false)
         if (busyNow) { busyNow = false; env.busyChanged(false) }
     }
 
     private fun clearOverlays() {
-        ui.join = null; ui.hostWait = null; ui.linkWait = null
+        ui.join = null; ui.hostWait = null; ui.linkWait = null; ui.trade = null
     }
 
     /** A game button (UI thread) while [CoopOverlayState.takesKeys]: true = it was the overlay's. */
@@ -330,7 +348,8 @@ object CoopBattles {
         detach()
         if (link == null || !mayHook(romSha1, app.coopOn, link)) return false
         val channel = CoopLinkChannel(link)
-        val g = CoopBattleGlue(app.core(), channel, app.emu, android.os.SystemClock::elapsedRealtime, app.overlay, app.env, linkEngine = MgbaLinkEngine())
+        val g = CoopBattleGlue(app.core(), channel, app.emu, android.os.SystemClock::elapsedRealtime, app.overlay, app.env,
+            linkEngine = MgbaLinkEngine(), tradeGame = MgbaTradeGame(app.env))
         val s = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         s.launch { channel.received.collect { runCatching { g.onReceived(it.first, it.second) } } }
         s.launch { link.state.map { it is CoopState.Connected }.distinctUntilChanged().collect { g.onLinkState(it) } }
@@ -363,6 +382,33 @@ object CoopBattles {
 
     /** A game button while an overlay wants it. */
     fun takeKey(k: MenuKey): Boolean = glue?.takeKey(k) == true
+
+    /** The QUICK MENU's TRADE: offered on co-op Emerald (a glue attached). */
+    fun tradeOffered(): Boolean = glue?.trade != null
+
+    /** Why TRADE can't start now (null = it can). Read on the UI thread: the flow's fields are plain, a moment stale at worst. */
+    fun tradeWhy(): String? {
+        val g = glue ?: return com.pokedaisy.app.companion.i18n.tr("No partner linked")
+        return g.trade?.why(g.busy)
+    }
+
+    /** TRADE picked: the window opens on the emu thread. */
+    fun startTrade(app: CoopApp) {
+        val g = glue ?: return
+        app.emu.post { g.trade?.start(g.busy) }
+    }
+}
+
+/** [MgbaCore] as a [CoopTradeGame]: emu thread. */
+class MgbaTradeGame(private val env: CoopGlueEnv) : CoopTradeGame {
+    override fun party(): List<ByteArray> = env.hostParty()
+    override fun name(): ByteArray = env.identity().name
+    override fun free() = MgbaCore.pkCoopPartnerFree()
+    override fun onFreeField() = MgbaCore.pkCoopOnFreeField()
+    override fun tradeMon(slot: Int, mon: ByteArray) = MgbaCore.pkCoopTradeMon(slot, mon)
+    override fun evolveTrade(slot: Int) = MgbaCore.pkCoopEvolveTrade(slot)
+    override fun saveGame() = MgbaCore.pkCoopSaveGame()
+    override fun beforeSave() = env.beforeSave()
 }
 
 /** The retail Emerald's RAM addresses the app side reads (the co-op bridge's own are in pk_coop_emerald.h). */

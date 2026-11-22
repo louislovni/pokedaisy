@@ -1135,7 +1135,12 @@ class PokeDaisyActivity : Activity() {
             com.pokedaisy.app.companion.QuickAction.TOUCH_SCREEN -> dsFloats.value || n3dsFloats
             // One screen held sideways: the companion's window or side panel (upright, it's always open).
             com.pokedaisy.app.companion.QuickAction.COMPANION -> hudSingleScreen.value && !hudUpright.value
+            // Co-op Emerald with the link hooked (CoopBattles.attach).
+            com.pokedaisy.app.companion.QuickAction.TRADE -> CoopBattles.tradeOffered()
         }
+
+        override fun blocked(action: com.pokedaisy.app.companion.QuickAction): String? =
+            if (action == com.pokedaisy.app.companion.QuickAction.TRADE) CoopBattles.tradeWhy() else null
 
         override fun run(action: com.pokedaisy.app.companion.QuickAction) = runQuickAction(action)
 
@@ -1214,6 +1219,7 @@ class PokeDaisyActivity : Activity() {
             }
             com.pokedaisy.app.companion.QuickAction.TOUCH_SCREEN -> toggleDsTouch()
             com.pokedaisy.app.companion.QuickAction.COMPANION -> if (::sidePanel.isInitialized) sidePanel.openPanel()
+            com.pokedaisy.app.companion.QuickAction.TRADE -> CoopBattles.startTrade(coopApp)
         }
     }
 

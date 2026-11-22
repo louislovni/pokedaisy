@@ -97,3 +97,20 @@ fun CoopNotice(text: String) {
         }
     }
 }
+
+/** A co-op trade's window (CoopTrade.kt): pick a Pokémon, answer an offer, confirm, or wait. */
+@Composable
+fun CoopTradeWindow(screen: CoopTradeScreen, onRow: (Int) -> Unit, onBack: () -> Unit) {
+    CompanionBackHandler(onBack = onBack)
+    CoopFrame(screen.title, trailing = screen.secondsLeft?.toString()) { m ->
+        if (screen.rows.isNotEmpty()) {
+            OptionListWindow(m, Modifier.fillMaxWidth()) {
+                Column {
+                    screen.rows.forEachIndexed { i, row ->
+                        OptionLine(row, null, selected = i == screen.sel, m, divider = i < screen.rows.lastIndex, onClick = { onRow(i) })
+                    }
+                }
+            }
+        }
+    }
+}

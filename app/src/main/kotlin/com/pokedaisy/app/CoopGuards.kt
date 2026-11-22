@@ -7,7 +7,7 @@ import java.util.EnumSet
  * switch on and off never undo each other. Any reason on = held / blocked.
  */
 object CoopGuards {
-    enum class Hold { LOCK_START, LOCK_LINK, BATTLE }
+    enum class Hold { LOCK_START, LOCK_LINK, BATTLE, TRADE }
     enum class StateBlock { LOCK, BATTLE }
 
     private val lock = Any()

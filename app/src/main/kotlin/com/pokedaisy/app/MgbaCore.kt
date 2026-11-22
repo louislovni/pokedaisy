@@ -493,6 +493,10 @@ object MgbaCore {
 
     /** The START menu's save steps: 1 saved, 0 the game said it failed, -1 not started (retry), -2 started but never returned: do not retry, treat as failed and keep the backup. */
     external fun pkCoopSaveGame(): Int
+    /** Co-op trades: the partner's 100-byte record into party slot [slot] (its OT kept, dexed): 1, 0 bad slot, -1 not now. */
+    external fun pkCoopTradeMon(slot: Int, mon: ByteArray): Int
+    /** A traded Pokémon's trade evolution scene: 1 started, 0 nothing to evolve into, -1 not now. */
+    external fun pkCoopEvolveTrade(slot: Int): Int
 
     /** Emu thread: the 32-byte palettes in [from] (back to back) swapped for [to] wherever the game has one loaded
      * (EWRAM's palette buffers, OBJ palette RAM). Returns how many. */

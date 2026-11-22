@@ -176,6 +176,8 @@ object NewFeatures {
     const val SAVE_EDITOR_DP = "save_editor_dp"
     /** The QUICK MENU's TURBO A tile: holding A mashes it until it's tapped again (GbaInput.turboLatch). */
     const val QUICK_TURBO = "quick_turbo"
+    /** The QUICK MENU's TRADE (co-op trades, CoopTrade.kt). */
+    const val COOP_TRADE = "coop_trade"
 
     /** SETTINGS > DS LAYOUT: a DS game's two screens on one (companion.DsLayout), its touch screen floating in over the
      * game when wanted; the TOUCH SCREEN hotkey and the HUD's TOUCH button open it by hand. */
@@ -244,7 +246,7 @@ object NewFeatures {
         AUDIO_EFFECTS, BATTLE_INFO, BATTLE_VIEW, GAME_NAMES, SUPPORTED_ONLY, LOOK_AROUND, INSTANT_TEXT, BATTLE_STYLE,
         QUICK_FLASH, ZOOM_SETTING, TOUCH_VIBRATION, TOUCH_MORE_BUTTONS, FREE_FLIGHT, SCENIC_FLY, FLIGHT_AREA, FLY_ON, RIDE_ON,
         DPAD_KEYS, RA_ICONS, DS_TOUCH_FILL, DS_CORE, RA_POPUPS, HIDE_BATTLE_MENU, SPRITE_PACK, HM_FREE, POKEMON_CENTER, EXP_SHARE, LEVEL_CAP, REPEL_REFILL, SHINY_ALERT, LAST_BALL, BOSS_RETRY, LOW_HP_BEEP, FIELD_POISON, SETTINGS_LOOK,
-        QUICK_TOUCH, APP_FONT, PAL_PARK, SAVE_MISSING, TRADE_BACK, SAVE_COLLECTION, POKE_TRANSFER, SAVE_EDITOR_GEN5, SAVE_EDITOR_DP, QUICK_TURBO,
+        QUICK_TOUCH, APP_FONT, PAL_PARK, SAVE_MISSING, TRADE_BACK, SAVE_COLLECTION, POKE_TRANSFER, SAVE_EDITOR_GEN5, SAVE_EDITOR_DP, QUICK_TURBO, COOP_TRADE,
         GAME_LOOK,
     )
 

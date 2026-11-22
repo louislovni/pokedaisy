@@ -215,6 +215,20 @@ If it doesn't come back:
 Until the battle is over you can't load or save a state, rewind, restart or soft reset the game, change cheats, turn
 `REUSABLE TMS` on or off, or change `PLAYER LOOK` or `TEXT LOOK`. You see a notice when you try. Achievements pause, as with cheats.
 
+## Trading
+
+Once you are paired and connected, you can trade Pokémon without going to a Pokémon Center. Open the QUICK MENU and
+pick `TRADE` (it is greyed out while your partner isn't linked or is busy in a battle or a menu).
+
+1. Pick the Pokémon you offer.
+2. Your partner sees what you offer and picks one of theirs, or `DON'T TRADE`.
+3. You see both and answer `YES` or `NO`.
+
+Both games are paused while you choose, and each of you has a minute to answer. Then the two Pokémon change games, each
+save is backed up and saved, and a Pokémon that evolves by trading evolves. A traded Pokémon keeps its first trainer, as
+in the game. Eggs can't be traded. If the link drops after your partner saved, your side finishes the trade as soon as
+you are linked again (keep the game open meanwhile). The same works with a partner playing on Capsule.
+
 ## Playing together only
 
 `PLAY TOGETHER ONLY` is in the companion's SETTINGS, in the `CO-OP` group. It turns your two games into one shared

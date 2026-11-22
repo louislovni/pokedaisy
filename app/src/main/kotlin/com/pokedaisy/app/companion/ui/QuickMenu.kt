@@ -108,6 +108,9 @@ interface QuickActions {
 
     /** FLASH would light this place up (a dark cave, the light not on yet); false = it's light here, null = can't tell. */
     fun flashDark(): Boolean? = null
+
+    /** Why [action] can't run now, where the app decides it (TRADE: the co-op link); null = ask [quickBlocked]. */
+    fun blocked(action: QuickAction): String? = null
 }
 
 /**
@@ -417,7 +420,7 @@ fun QuickMenu(state: QuickMenuState, snapshot: SnapshotView, actions: QuickActio
     val dark = if (QuickAction.FLASH in shown) actions.flashDark() else null
     state.items = items
     val flying = actions.flying()
-    state.blocked = { quickBlocked(it, snapshot, repelSteps, dark, flying) }
+    state.blocked = { (actions.blocked(it) ?: quickBlocked(it, snapshot, repelSteps, dark, flying)) }
     state.repelKinds = repelKindsIn(snapshot)
     LaunchedEffect(items.size) { state.clamp() }
     val m = rememberGbaTextMetrics(1f)
@@ -433,14 +436,14 @@ fun QuickMenu(state: QuickMenuState, snapshot: SnapshotView, actions: QuickActio
             val repels = state.repels
             val confirm = state.confirm
             val current = items.getOrNull(state.index)
-            val why = current?.let { quickBlocked(it, snapshot, repelSteps, dark, flying) }
+            val why = current?.let { (actions.blocked(it) ?: quickBlocked(it, snapshot, repelSteps, dark, flying)) }
             val hint = current?.let { why ?: quickHint(it, actions) }
             val ring = state.ring
             val tile: @Composable (Int) -> Unit = { i ->
                 // UniformTiles' slots can recompose with the count they were last measured with while this lambda
                 // already sees the new, shorter list (an action no longer offered): skip the index that's gone.
                 val a = items.getOrNull(i)
-                if (a != null) QuickTile(a, snapshot, actions, selected = i == state.index, blocked = quickBlocked(a, snapshot, repelSteps, dark, flying) != null, m, label = state.labels) { state.tap(i) }
+                if (a != null) QuickTile(a, snapshot, actions, selected = i == state.index, blocked = (actions.blocked(a) ?: quickBlocked(a, snapshot, repelSteps, dark, flying)) != null, m, label = state.labels) { state.tap(i) }
             }
             if (fly != null || repels != null || confirm != null || items.isEmpty() || !ring) {
                 Column(
@@ -821,6 +824,7 @@ private fun QuickIcon(action: QuickAction, s: SnapshotView, actions: QuickAction
         QuickAction.TURBO -> PixelIcon(TURBO_ICON, ink.text, Modifier.size(size * 0.8f))
         QuickAction.TOUCH_SCREEN -> PixelArt(TOUCH_ICON, TOUCH_COLORS, Modifier.size(size * 0.8f))
         QuickAction.COMPANION -> PixelIcon(COMPANION_ICON, ink.text, Modifier.size(size * 0.6f))
+        QuickAction.TRADE -> PixelIcon(TRADE_ICON, ink.text, Modifier.size(size * 0.8f))
     }
 }
 
@@ -848,6 +852,7 @@ fun quickMenuRows(
             QuickAction.HEAL -> NewFeatures.badge(NewFeatures.POKEMON_CENTER)
             QuickAction.TOUCH_SCREEN -> NewFeatures.badge(NewFeatures.QUICK_TOUCH)
             QuickAction.TURBO -> NewFeatures.badge(NewFeatures.QUICK_TURBO)
+            QuickAction.TRADE -> NewFeatures.badge(NewFeatures.COOP_TRADE)
             else -> null
         }
         SettingRow(a.label, onOff(a in shown), labelBadge = badge, labelIcon = quickRowIcon(a), iconPixels = ROW_ICON_PIXELS) {
@@ -877,6 +882,7 @@ private fun quickRowIcon(action: QuickAction): @Composable () -> Unit = {
         QuickAction.TURBO -> PixelIcon(TURBO_ICON, text, fill)
         QuickAction.TOUCH_SCREEN -> PixelArt(TOUCH_ICON, TOUCH_COLORS, fill)
         QuickAction.COMPANION -> PixelIcon(COMPANION_ICON, text, Modifier.fillMaxSize(0.75f))
+        QuickAction.TRADE -> PixelIcon(TRADE_ICON, text, fill)
     }
 }
 
@@ -995,6 +1001,22 @@ private val STATE_COLORS = mapOf(
 )
 
 /** An A with speed lines: TURBO A. */
+/** TRADE (a co-op trade): two arrows passing each other. */
+private val TRADE_ICON = listOf(
+    "........1...",
+    "........11..",
+    "111111111111",
+    "........11..",
+    "........1...",
+    "............",
+    "...1........",
+    "..11........",
+    "111111111111",
+    "..11........",
+    "...1........",
+    "............",
+)
+
 private val TURBO_ICON = listOf(
     "............",
     "......1111..",
