@@ -2585,7 +2585,7 @@ int main(int argc, char **argv) {
           list.title = listTitle;
         free(pendingPatch);
         pendingPatch = NULL;
-      } else if (down(A) && count)
+      } else if ((down(A) || down(START)) && count) // START too: Enter is the first key a player tries on a list
         appError = 0, run_game(paths[list.selected], 0, NULL, true); // the last game's result is the exit status
       SDL_RenderClear(renderer);
       overlay_begin();
