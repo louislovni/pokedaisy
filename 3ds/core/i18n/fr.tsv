@@ -198,3 +198,15 @@ This guide was written with the help of AI, from the game's own data. It can sti
 NUZLOCKE tracking is off for this game. Turn it on and the companion keeps score of your run: only the first wild POKéMON in each area counts, and a POKéMON that faints is out for good.	Le suivi NUZLOCKE est désactivé pour ce jeu. Active-le et le compagnon tient le compte de ta partie : seul le premier POKéMON sauvage de chaque zone compte, et un POKéMON K.O. est perdu pour de bon.
 DAY AND NIGHT	JOUR ET NUIT
 IVS	IV
+# Co-op joined battles (libretro/pd_coop_battle.inc)
+%s IS IN A BATTLE (%d)	{0} EST EN COMBAT ({1})
+%s JOIN     %s NO	{0} REJOINDRE     {1} NON
+ASKING YOUR PARTNER (%d)	INVITATION ENVOYÉE ({0})
+B: CANCEL	B : ANNULER
+WAITING FOR %s... (%d)	EN ATTENTE DE {0}... ({1})
+THE LINK DROPPED. THE BATTLE WAS UNDONE.	LIEN PERDU, COMBAT ANNULÉ.
+THE BATTLE COULD NOT START TOGETHER.	LE COMBAT À DEUX N'A PAS DÉMARRÉ.
+YOUR PARTNER LEFT. THE BATTLE WAS UNDONE.	PARTENAIRE PARTI, COMBAT ANNULÉ.
+SOME CHANGES COULD NOT BE APPLIED.	CHANGEMENTS NON APPLIQUÉS.
+NO ROOM FOR THE CAUGHT POKéMON.	PLUS DE PLACE POUR LE POKéMON.
+THE GAME COULD NOT BE SAVED.	SAUVEGARDE IMPOSSIBLE.

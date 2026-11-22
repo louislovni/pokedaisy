@@ -342,6 +342,7 @@ static struct {
   int32_t lastField[PK_PARTNER_SELF_N];
 } cp;
 static int coopAvailable = -1; // -1 not worked out for this game
+static uint32_t coopNow;      // the frontend's clock at its last retro_pd_coop_frame (the presence's own time)
 
 static void coop_game_changed(void) {
   coopAvailable = -1;
@@ -394,6 +395,7 @@ RETRO_API void retro_pd_coop_stop(void) {
 RETRO_API int retro_pd_coop_frame(uint32_t now, uint8_t *out) {
   if (!retro_pd_coop_available())
     return 0;
+  coopNow = now;
   bool field = (fieldFlags & PK_FIELD_KNOWN) && !(fieldFlags & PK_FIELD_BATTLE) && !snap.inBattle &&
                (!wideSupported || pk_wide_scene() == PK_WIDE_SCENE_FIELD);
   int32_t self[PK_PARTNER_SELF_N];

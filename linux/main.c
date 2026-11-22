@@ -1789,7 +1789,10 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     struct capsule_coop_core coop = {(int (*)(void))dlsym(core.dl, "retro_pd_coop_available"),
                                      (int (*)(uint32_t, uint8_t *))dlsym(core.dl, "retro_pd_coop_frame"),
                                      (void (*)(const uint8_t *, size_t, uint32_t))dlsym(core.dl, "retro_pd_coop_receive"),
-                                     (void (*)(void))dlsym(core.dl, "retro_pd_coop_stop")};
+                                     (void (*)(void))dlsym(core.dl, "retro_pd_coop_stop"),
+                                     (void (*)(int, const uint8_t *, size_t))dlsym(core.dl, "retro_pd_coop_battle_in"),
+                                     (int (*)(int *, uint8_t *, int))dlsym(core.dl, "retro_pd_coop_battle_out"),
+                                     (void (*)(int))dlsym(core.dl, "retro_pd_coop_battle_link")};
     capsule_coop_game(rom, romSize, sav, &coop);
   }
 #endif

@@ -702,7 +702,7 @@ static void cb_ops_step(void) {
   if (op == CBO_GIVE) {
     r = api->give_mon(core, cb.giveMon);
     if (r == 2)
-      cb_notice("NO ROOM FOR THE CAUGHT POKEMON.");
+      cb_notice("NO ROOM FOR THE CAUGHT POKéMON.");
   } else if (op == CBO_WHITEOUT) {
     r = api->white_out(core);
   } else {
@@ -786,7 +786,7 @@ static void cb_late_step(void) {
     return;
   cb.lateGive = false;
   if (r == 2) {
-    cb_notice("NO ROOM FOR THE CAUGHT POKEMON.");
+    cb_notice("NO ROOM FOR THE CAUGHT POKéMON.");
     return;
   }
   cb.unsaved = true;
@@ -801,7 +801,7 @@ static bool cb_nearby(void) {
   if (!pk_partner_self(core, self) || !self[PK_PARTNER_SELF_VALID] || !sm.n)
     return false;
   const struct coop_update *last = &sm.buf[sm.n - 1].u;
-  if (!last->valid || coop_diff(cbNow, sm.buf[sm.n - 1].arrived) > PD_COOP_STALE_MS)
+  if (!last->valid || coop_diff(coopNow, sm.buf[sm.n - 1].arrived) > PD_COOP_STALE_MS)
     return false;
   if (self[PK_PARTNER_SELF_GROUP] != last->group || self[PK_PARTNER_SELF_NUM] != last->num)
     return false;
@@ -1231,7 +1231,7 @@ static void coop_partner_name(char *out, size_t cap) {
   out[0] = 0;
   if (cb.phase == CBP_P_PROMPT)
     cb_name_text(cb.offer.name, out, cap);
-  else if (cb.phase >= CBP_H_WAIT)
+  else if (cb.phase >= CBP_H_WAIT && cb.other.name[0] != 0xFF)
     cb_name_text(cb.other.name, out, cap);
 }
 
@@ -1245,18 +1245,18 @@ static void cb_draw(void) {
   coop_partner_name(partner, sizeof partner);
   if (cb.phase == CBP_P_PROMPT) {
     int left = (int)((CB_PROMPT_MS - (cbNow - cb.phaseAt) + 999) / 1000);
-    snprintf(l1, sizeof l1, "%s IS IN A BATTLE. JOIN? (%d)", partner[0] ? partner : "YOUR PARTNER", left < 0 ? 0 : left);
+    snprintf(l1, sizeof l1, "%s IS IN A BATTLE (%d)", partner[0] ? partner : "?", left < 0 ? 0 : left);
     snprintf(l2, sizeof l2, "%s JOIN     %s NO", cb.cursorJoin ? ">" : " ", cb.cursorJoin ? " " : ">");
   } else if (cb.phase == CBP_H_ASKING || cb.phase == CBP_H_WAIT) {
     uint32_t total = cb.phase == CBP_H_ASKING ? CB_PROMPT_MS : CB_START_WAIT_MS;
     uint32_t since = cb.phase == CBP_H_ASKING ? cb.askedAt : cb.phaseAt;
     int left = (int)((total - (cbNow - since) + 999) / 1000);
-    snprintf(l1, sizeof l1, "ASKING %s TO JOIN... (%d)", partner[0] ? partner : "YOUR PARTNER", left < 0 ? 0 : left);
+    snprintf(l1, sizeof l1, "ASKING YOUR PARTNER (%d)", left < 0 ? 0 : left);
     if (cb.phase == CBP_H_ASKING)
       snprintf(l2, sizeof l2, "B: CANCEL");
   } else if (lb.active && lb.down && !lb.endedSeen) {
     int left = (int)((CB_DROP_MS - (cbNow - lb.downAt) + 999) / 1000);
-    snprintf(l1, sizeof l1, "WAITING FOR %s... (%d)", partner[0] ? partner : "YOUR PARTNER", left < 0 ? 0 : left);
+    snprintf(l1, sizeof l1, "WAITING FOR %s... (%d)", partner[0] ? partner : "?", left < 0 ? 0 : left);
   } else if (cbNotice[0] && (int32_t)(cbNoticeUntil - cbNow) > 0) {
     snprintf(l1, sizeof l1, "%s", cbNotice);
   } else {
@@ -1295,6 +1295,16 @@ static void cb_game_changed(void) {
   lb.expected = 0;
   cbOut.head = cbOut.tail = cbOut.used = cbOut.count = 0;
 }
+
+#ifdef PD_COOP_TEST
+/* The headless two-game test's RAM access (never in a shipped build). */
+RETRO_API int retro_pd_test_read(uint32_t a, uint8_t *out, int n) { return core && pd_lr_read_memory(core, a, out, (size_t)n); }
+RETRO_API void retro_pd_test_write(uint32_t a, const uint8_t *in, int n) {
+  for (int i = 0; core && i < n; i++)
+    core->busWrite8(core, a + (uint32_t)i, in[i]);
+}
+RETRO_API int retro_pd_test_phase(void) { return cb.phase | (lb.active ? 0x100 : 0) | (lb.pumping ? 0x200 : 0); }
+#endif
 
 #else
 static void cb_before_frame(void) {}
