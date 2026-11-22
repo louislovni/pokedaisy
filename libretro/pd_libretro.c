@@ -2662,13 +2662,19 @@ static void bs_after_run(void) {
         if (!(pos[b] & 1) && anims[b])
           bsTrainerBack = anims[b];
     bsWasInBattle = true;
+    // Waiting for the player's pick: every battler's picture is its Pokémon's (a battle resumed from a state never
+    // showed the trainers), so what's learnt from the start can be learnt here too.
+    int waitingFor = -1;
+    enum pd_battle_state st = (bsMonBack && bsFrontTable) ? PD_BATTLE_NONE
+                              : pd_battle_state_read(game.cfg, pd_lr_read_memory, core, &waitingFor);
+    bool picking = st == PD_BATTLE_ACTION || st == PD_BATTLE_MOVE;
     for (int b = 0; b < count && b < 4; b++) {
       uint8_t sp[2];
       if (!anims[b] || (anims[b] >> 24) != 0x08 || !pd_lr_read_memory(core, game.cfg->battleMons + b * 0x58u, sp, 2))
         continue;
-      if (!(pos[b] & 1) && !bsMonBack && bsTrainerBack && anims[b] != bsTrainerBack)
+      if (!(pos[b] & 1) && !bsMonBack && ((bsTrainerBack && anims[b] != bsTrainerBack) || picking))
         bsMonBack = anims[b];
-      if ((pos[b] & 1) && !bsFrontTable && !(type[0] & 0x08)) // a wild battle's foe is its Pokémon from the start
+      if ((pos[b] & 1) && !bsFrontTable && (!(type[0] & 0x08) || picking)) // a wild battle's foe is its Pokémon from the start
         bs_find_front(anims[b], sp[0] | sp[1] << 8);
     }
     for (int b = 0; b < 4; b++) {
