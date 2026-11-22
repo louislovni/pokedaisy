@@ -46,6 +46,12 @@ int pk_coop_evolve(struct mCore* core, int slot) {
     return pk_coop_french(core) ? pk_coopfr_evolve(core, slot) : pk_coopen_evolve(core, slot);
 }
 
+int pk_coopen_evolve_trade(struct mCore* core, int slot);
+int pk_coopfr_evolve_trade(struct mCore* core, int slot);
+int pk_coop_evolve_trade(struct mCore* core, int slot) {
+    return pk_coop_french(core) ? pk_coopfr_evolve_trade(core, slot) : pk_coopen_evolve_trade(core, slot);
+}
+
 int pk_coopen_give_mon(struct mCore* core, const uint8_t mon[100]);
 int pk_coopfr_give_mon(struct mCore* core, const uint8_t mon[100]);
 int pk_coop_give_mon(struct mCore* core, const uint8_t mon[100]) {
@@ -503,6 +509,12 @@ int pk_coopen_story_state(struct mCore* core);
 int pk_coopfr_story_state(struct mCore* core);
 int pk_coop_story_state(struct mCore* core) {
     return pk_coop_french(core) ? pk_coopfr_story_state(core) : pk_coopen_story_state(core);
+}
+
+int pk_coopen_trade_mon(struct mCore* core, int slot, const uint8_t mon[100]);
+int pk_coopfr_trade_mon(struct mCore* core, int slot, const uint8_t mon[100]);
+int pk_coop_trade_mon(struct mCore* core, int slot, const uint8_t mon[100]) {
+    return pk_coop_french(core) ? pk_coopfr_trade_mon(core, slot, mon) : pk_coopen_trade_mon(core, slot, mon);
 }
 
 void pk_coopen_uninstall(struct mCore* core);

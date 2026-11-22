@@ -1796,6 +1796,11 @@ RETRO_API void retro_run(void) {
         settings.wildOff ? NULL : pcFieldWhy, 0, 0, NULL};
   if (host.hasHud && settings.hud)
     quick[quickN++] = (struct quick_item){QUICK_HUD, false, false, hudShown && hudHits.n ? NULL : "No HUD on screen", 0, 0, NULL};
+  {
+    const char *tradeWhy = cb_trade_why(); // co-op Emerald only; dimmed with why when not now
+    if (!tradeWhy || tradeWhy[0])
+      quick[quickN++] = (struct quick_item){QUICK_TRADE, false, false, tradeWhy, 0, 0, NULL};
+  }
   quick[quickN++] = (struct quick_item){QUICK_COMPANION, false, false, NULL, 0, 0, NULL};
   if (quickSel >= quickN)
     quickSel = 0;
@@ -1913,6 +1918,10 @@ RETRO_API void retro_run(void) {
         break;
       case QUICK_COMPANION:
         companion = true;
+        break;
+      case QUICK_TRADE:
+        shortcutBlocked |= held; // the A that picked it stays out of the trade window
+        cb_trade_start();
         break;
       case QUICK_HUD:
         hud_focus_start();

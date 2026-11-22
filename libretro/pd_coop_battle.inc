@@ -52,6 +52,8 @@ int pk_coopfr_story_go(struct mCore *core, struct pk_coop_link_setup *setup);
 int pk_coopfr_story_cancel(struct mCore *core);
 void pk_coopfr_story_disarm(struct mCore *core);
 int pk_coopfr_release_script(struct mCore *core);
+int pk_coopfr_trade_mon(struct mCore *core, int slot, const uint8_t mon[100]);
+int pk_coopfr_evolve_trade(struct mCore *core, int slot);
 void pk_coopfr_after_set_call(pk_coop_call_fn call);
 void pk_coopfr_after_set_cap(pk_coop_cap_fn cap);
 
@@ -88,6 +90,8 @@ static const struct coop_api {
   int (*story_cancel)(struct mCore *);
   void (*story_disarm)(struct mCore *);
   int (*release_script)(struct mCore *);
+  int (*trade_mon)(struct mCore *, int, const uint8_t *);
+  int (*evolve_trade)(struct mCore *, int);
   uint32_t battleMoves; /* gBattleMoves (the PP check of a partner's Pokémon) */
 } COOP_EN = {pk_coop_install, pk_coop_refused, pk_coop_link_install, pk_coop_link_refused, pk_coop_link_take,
              pk_coop_link_give, pk_coop_link_state, pk_coop_link_tick, pk_coop_link_bad_blocks, pk_coop_link_leave,
@@ -95,7 +99,7 @@ static const struct coop_api {
              pk_coop_link_host_go, pk_coop_link_partner_go, pk_coop_on_free_field, pk_coop_join_kind, pk_coop_join_trainers,
              pk_coop_partner_free, pk_coop_give_mon, pk_coop_save_game, pk_coop_white_out, pk_coop_after_set_call,
              pk_coop_after_set_cap, pk_coop_story_arm, pk_coop_story_state, pk_coop_story_go, pk_coop_story_cancel,
-             pk_coop_story_disarm, pk_coop_release_script, 0x0831C898u},
+             pk_coop_story_disarm, pk_coop_release_script, pk_coop_trade_mon, pk_coop_evolve_trade, 0x0831C898u},
   COOP_FR = {pk_coopfr_install, pk_coopfr_refused, pk_coopfr_link_install, pk_coopfr_link_refused, pk_coopfr_link_take,
              pk_coopfr_link_give, pk_coopfr_link_state, pk_coopfr_link_tick, pk_coopfr_link_bad_blocks, pk_coopfr_link_leave,
              pk_coopfr_link_result, pk_coopfr_link_result_clear, pk_coopfr_link_reset, pk_coopfr_link_caught,
@@ -103,7 +107,7 @@ static const struct coop_api {
              pk_coopfr_join_kind, pk_coopfr_join_trainers, pk_coopfr_partner_free, pk_coopfr_give_mon, pk_coopfr_save_game,
              pk_coopfr_white_out, pk_coopfr_after_set_call, pk_coopfr_after_set_cap, pk_coopfr_story_arm,
              pk_coopfr_story_state, pk_coopfr_story_go, pk_coopfr_story_cancel, pk_coopfr_story_disarm,
-             pk_coopfr_release_script, 0x08324408u};
+             pk_coopfr_release_script, pk_coopfr_trade_mon, pk_coopfr_evolve_trade, 0x08324408u};
 
 /* Retail English and French Emerald only (their SHA-1s: the bridge's addresses are those carts'). */
 static const struct coop_api *cb_api(void) {
@@ -503,7 +507,9 @@ static void cb_ops_load(const int *ops, int n) {
   cb.opAt = 0;
   cb.opsSince = cbNow;
 }
-enum { CBO_GIVE, CBO_SAVE, CBO_WHITEOUT };
+enum { CBO_GIVE, CBO_SAVE, CBO_WHITEOUT, CBO_TRADE_SAVE, CBO_EVOLVE_TRADE };
+static void tr_saved(bool ok);
+static int tr_evolve_slot(void);
 
 static void cb_reset(void) {
   cb.phase = CBP_IDLE;
@@ -737,10 +743,14 @@ static void cb_ops_step(void) {
       cb_notice("NO ROOM FOR THE CAUGHT POKéMON.");
   } else if (op == CBO_WHITEOUT) {
     r = api->white_out(core);
+  } else if (op == CBO_EVOLVE_TRADE) {
+    r = api->evolve_trade(core, tr_evolve_slot());
   } else {
     r = api->save_game(core);
     if (r == 0 || r == -2)
       cb_notice("THE GAME COULD NOT BE SAVED.");
+    if (op == CBO_TRADE_SAVE && r != -1)
+      tr_saved(r == 1);
     if (r == 1 && cb.unsaved) {
       /* the partner's catch is in this game and saved: acknowledged, remembered as given */
       cb_send_id(CB_RESULT_ACK, cb.unsavedId, NULL, 0);
@@ -1240,6 +1250,10 @@ static void cb_story_message(const struct cb_msg *m, int state) {
   }
 }
 
+static void cb_name_text(const uint8_t *n, char *out, size_t cap);
+#include "pd_coop_trade.inc"
+static int tr_evolve_slot(void) { return tr.evolveSlot; }
+
 /* ---- messages and the link ---- */
 static void cb_cancelled(int reason) {
   cb.heard = true;
@@ -1287,6 +1301,11 @@ static void cb_cancelled(int reason) {
 
 RETRO_API void retro_pd_coop_battle_in(int type, const uint8_t *p, size_t n) {
   struct cb_msg m;
+  if (type >= TR_ASK && type <= TR_CANCEL) {
+    if (p && n <= 4 + 1 + CB_NAME + 1 + CB_MON && cb_api())
+      tr_in(type, p, n);
+    return;
+  }
   if (!p || n > CB_MAX_PAYLOAD + 64 || !cb_api() || !cb_decode(type, p, (int)n, &m))
     return;
   switch (m.type) {
@@ -1347,6 +1366,7 @@ RETRO_API void retro_pd_coop_battle_link(int connected) {
   if (up == cb_connected)
     return;
   cb_connected = up;
+  tr_link(up);
   if (up)
     cb.caughtSent = 0;
   switch (cb.phase) {
@@ -1414,7 +1434,7 @@ static void cb_status(void) {
 }
 
 /* The game is held while the partner is asked / starts (no frame runs). */
-static bool cb_hold(void) { return (cb.phase == CBP_H_ASKING && cb.kind != CB_STORY) || cb.phase == CBP_H_WAIT; }
+static bool cb_hold(void) { return (cb.phase == CBP_H_ASKING && cb.kind != CB_STORY) || cb.phase == CBP_H_WAIT || tr_hold(); }
 
 /* The overlay takes the keys while it asks. */
 static bool cb_takes_keys(void) { return cb.phase == CBP_P_PROMPT || cb_hold(); }
@@ -1431,6 +1451,7 @@ static void cb_before_frame(void) {
   if (!api)
     return;
   cbNow = cb_clock();
+  tr_tick();
   cb_status();
   switch (cb.phase) {
   case CBP_IDLE:
@@ -1508,7 +1529,7 @@ static void cb_before_frame(void) {
 
 /* Something to draw over the game this frame. */
 static bool cb_overlay(void) {
-  return cb_api() && (cb.phase == CBP_P_PROMPT || cb.phase == CBP_H_ASKING || cb.phase == CBP_H_WAIT ||
+  return cb_api() && (tr.phase || cb.phase == CBP_P_PROMPT || cb.phase == CBP_H_ASKING || cb.phase == CBP_H_WAIT ||
                       (lb.active && lb.down && !lb.endedSeen) || (cb.phase == CBP_S_ARMED && cb.armDownAt) || (cbNotice[0] && (int32_t)(cbNoticeUntil - cbNow) > 0));
 }
 
@@ -1535,9 +1556,34 @@ static void coop_partner_name(char *out, size_t cap) {
 }
 
 /* The prompt, the wait and the notices, over the game (canvas pixels, at the game's scale). */
+static void cb_blit(const uint32_t *px, int w, int y0, int y1, int s) {
+  for (int yy = y0; yy < y1; yy++)
+    for (int xx = 0; xx < w; xx++) {
+      uint32_t c = px[yy * w + xx];
+      if (c == 0xFF00FF)
+        continue;
+      for (int dy = 0; dy < s; dy++)
+        for (int dx = 0; dx < s; dx++)
+          cvs[(yy * s + dy) * CW + xx * s + dx] = c;
+    }
+}
+
 static void cb_draw(void) {
   if (!cb_api())
     return;
+  if (tr.phase) {
+    int s = canvasScale > 0 ? canvasScale : 1, w = CW / s, h = CH / s;
+    static uint32_t tpx[1024 * 1024 / 4];
+    if (w * h > (int)(sizeof tpx / sizeof tpx[0]))
+      return;
+    struct pd_canvas small;
+    pd_canvas_init(&small, w, h, tpx);
+    for (int i = 0; i < w * h; i++)
+      tpx[i] = 0xFF00FF;
+    if (tr_draw_small(&small, w, h))
+      cb_blit(tpx, w, 0, h, s);
+    return;
+  }
   int s = canvasScale > 0 ? canvasScale : 1;
   char l1[96] = "", l2[96] = "";
   char partner[40];
@@ -1593,6 +1639,7 @@ static void cb_draw(void) {
 
 /* The game closed or changed: nothing carries over (a running link battle was left by the frontend's stop). */
 static void cb_game_changed(void) {
+  memset(&tr, 0, sizeof tr);
   memset(&cb, 0, sizeof cb);
   cb.token = (uint32_t)rand() % 1000u; /* two players reaching a story spot together: the shorter wait offers */
   cb.storySent = -1;
@@ -1608,6 +1655,8 @@ RETRO_API void retro_pd_test_write(uint32_t a, const uint8_t *in, int n) {
   for (int i = 0; core && i < n; i++)
     core->busWrite8(core, a + (uint32_t)i, in[i]);
 }
+RETRO_API void retro_pd_test_trade(void) { tr_start(); }
+RETRO_API int retro_pd_test_trade_phase(void) { return tr.phase | (tr.pending ? 0x100 : 0) | (tr.doneOwed ? 0x200 : 0); }
 RETRO_API int retro_pd_test_phase(void) {
   const struct coop_api *api = cb_api();
   uint8_t r[PK_COOP_LINK_RESULT_SIZE];
@@ -1617,7 +1666,17 @@ RETRO_API int retro_pd_test_phase(void) {
 }
 #endif
 
+/* The QUICK MENU's TRADE: NULL = shown and ready; "" = not shown (not co-op Emerald). */
+static const char *cb_trade_why(void) {
+  if (!cb_api() || !coopAvailable)
+    return "";
+  return tr_why();
+}
+static void cb_trade_start(void) { tr_start(); }
+
 #else
+static const char *cb_trade_why(void) { return ""; }
+static void cb_trade_start(void) {}
 static void cb_before_frame(void) {}
 static void cb_after_frame(void) {}
 static void cb_draw(void) {}

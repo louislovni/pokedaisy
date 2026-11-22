@@ -37,6 +37,11 @@ int pk_coop_write_party_mon(struct mCore* core, int slot, const uint8_t mon[100]
 int pk_coop_white_out(struct mCore* core);
 // The evolution scene for party slot `slot`, back on the field after: 1 started, 0 nothing to evolve into (or a bad slot), -1.
 int pk_coop_evolve(struct mCore* core, int slot);
+// The same for a traded Pokemon (EVO_MODE_TRADE: a trade evolution; the game takes a trade item off as it evolves).
+int pk_coop_evolve_trade(struct mCore* core, int slot);
+// A Pokemon traded in: the record as it is (its own OT) into party slot `slot` (below gPlayerPartyCount), its species SEEN and
+// CAUGHT in the Pokedex: 1, 0 for a bad slot, -1 (not on a free field, or the game can't be called).
+int pk_coop_trade_mon(struct mCore* core, int slot, const uint8_t mon[100]);
 // The START menu's save steps: 1 saved, 0 the game said it failed, -1 not started (nothing changed, retry), -2 started but the call
 // never returned: DO NOT retry (the flash may be mid-write); treat the save as failed and keep the backup.
 int pk_coop_save_game(struct mCore* core);

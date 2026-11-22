@@ -222,6 +222,12 @@ const char *const quick_icon_companion[] = {
     ".11.....", "..11....", "...11...", "....11..", ".....11.", "......11", NULL,
 };
 
+// TRADE: two arrows passing each other.
+static const char *const TRADE[] = {
+    "........1...", "........11..", "111111111111", "........11..", "........1...", "............",
+    "...1........", "..11........", "111111111111", "..11........", "...1........", NULL,
+};
+
 const char *const quick_icon_hud[] = {
     "11111..11111", "1..........1", "1..........1", "1....11....1", "1....11....1", "1..........1", "1..........1",
     "11111..11111", NULL,
@@ -242,6 +248,7 @@ const char *quick_label(enum quick_action a) {
   case QUICK_FF: return "FF";
   case QUICK_COMPANION: return "COMPANION";
   case QUICK_HUD: return "HUD";
+  case QUICK_TRADE: return "TRADE";
   default: return "";
   }
 }
@@ -286,7 +293,7 @@ static void icon(struct pd_canvas *c, enum quick_action a, int cx, int cy, int s
                           : a == QUICK_LOAD_STATE ? LOAD_STATE : a == QUICK_FF ? FF : a == QUICK_REPEL ? quick_icon_repel
                           : a == QUICK_BIKE ? BIKE : a == QUICK_FLY ? WING : a == QUICK_FLASH ? FLASH
                           : a == QUICK_FLIGHT ? TAKE_OFF : a == QUICK_LAND ? LAND
-                          : a == QUICK_HUD ? quick_icon_hud : quick_icon_companion;
+                          : a == QUICK_HUD ? quick_icon_hud : a == QUICK_TRADE ? TRADE : quick_icon_companion;
   int h = 0, w = (int)strlen(rows[0]);
   while (rows[h])
     h++;

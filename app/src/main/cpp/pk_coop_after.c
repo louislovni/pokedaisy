@@ -36,6 +36,7 @@
 #define AFTER_SAVE_STATUS_OK 1u
 #define AFTER_GAME_STAT_SAVED_GAME 0u
 #define AFTER_EVO_MODE_NORMAL 0u
+#define AFTER_EVO_MODE_TRADE 1u
 
 // TrySavingData runs ~15.6 million CPU steps (the flash chip's write times: measured headless, 15,642,476 on the co-op test
 // save): a call's default cap is 2 million, so the save's call gets this many (6x what it was seen to need). A call that hit
@@ -258,7 +259,46 @@ int pk_coop_white_out(struct mCore* core) {
 
 // gCB2_AfterEvolution = CB2_ReturnToField, then BeginEvolutionScene(mon, GetEvolutionTargetSpecies(mon, EVO_MODE_NORMAL, 0),
 // TRUE, slot): the game's own scene, back on the field when it ends. 0 = nothing to evolve into.
+static int after_evolve(struct mCore* core, int slot, uint32_t mode);
+
 int pk_coop_evolve(struct mCore* core, int slot) {
+    return after_evolve(core, slot, AFTER_EVO_MODE_NORMAL);
+}
+
+int pk_coop_evolve_trade(struct mCore* core, int slot) {
+    return after_evolve(core, slot, AFTER_EVO_MODE_TRADE);
+}
+
+int pk_coop_trade_mon(struct mCore* core, int slot, const uint8_t mon[100]) {
+    if (!after_free(core)) {
+        return -1;
+    }
+    uint32_t count = core->busRead8(core, COOP_EM_gPlayerPartyCount);
+    if (slot < 0 || (uint32_t) slot >= count || slot >= (int) COOP_EM_PARTY_SIZE) {
+        return 0;
+    }
+    // The dex first (nothing changed if the game can't be called now): the species read from the record, as given.
+    uint8_t backup[COOP_EM_OFF_MON_SIZE];
+    for (uint32_t i = 0; i < sizeof(backup); i++) backup[i] = (uint8_t) core->busRead8(core, AFTER_SCRATCH + i);
+    for (uint32_t i = 0; i < sizeof(backup); i++) core->busWrite8(core, AFTER_SCRATCH + i, mon[i]);
+    uint32_t species = 0, nat = 0;
+    int ok = after_call(core, COOP_EM_GetMonData, COOP_EM_CRC_GetMonData, AFTER_SCRATCH, COOP_EM_MON_DATA_SPECIES, 0, &species)
+             && (species &= 0xFFFFu) >= 1 && species <= AFTER_SPECIES_LAST
+             && after_call(core, COOP_EM_SpeciesToNationalPokedexNum, COOP_EM_CRC_SpeciesToNationalPokedexNum, species, 0, 0, &nat);
+    for (uint32_t i = 0; i < sizeof(backup); i++) core->busWrite8(core, AFTER_SCRATCH + i, backup[i]);
+    if (!ok) {
+        return -1;
+    }
+    nat &= 0xFFFFu;
+    after_call(core, COOP_EM_GetSetPokedexFlag, COOP_EM_CRC_GetSetPokedexFlag, nat, AFTER_FLAG_SET_SEEN, 0, NULL);
+    after_call(core, COOP_EM_GetSetPokedexFlag, COOP_EM_CRC_GetSetPokedexFlag, nat, AFTER_FLAG_SET_CAUGHT, 0, NULL);
+    // The record as it came (its own OT: a traded Pokemon keeps its trainer), in place of the one traded away.
+    const uint32_t at = COOP_EM_gPlayerParty + (uint32_t) slot * COOP_EM_OFF_MON_SIZE;
+    for (uint32_t i = 0; i < COOP_EM_OFF_MON_SIZE; i++) core->busWrite8(core, at + i, mon[i]);
+    return 1;
+}
+
+static int after_evolve(struct mCore* core, int slot, uint32_t mode) {
     if (!after_free(core)) {
         return -1;
     }
@@ -268,7 +308,7 @@ int pk_coop_evolve(struct mCore* core, int slot) {
     }
     const uint32_t mon = COOP_EM_gPlayerParty + (uint32_t) slot * COOP_EM_OFF_MON_SIZE;
     uint32_t target = 0;
-    if (!after_call(core, COOP_EM_GetEvolutionTargetSpecies, COOP_EM_CRC_GetEvolutionTargetSpecies, mon, AFTER_EVO_MODE_NORMAL, 0, &target)) {
+    if (!after_call(core, COOP_EM_GetEvolutionTargetSpecies, COOP_EM_CRC_GetEvolutionTargetSpecies, mon, mode, 0, &target)) {
         return -1;
     }
     target &= 0xFFFFu;

@@ -7,6 +7,7 @@
 #define pk_coop_after_set_cap pk_coopfr_after_set_cap
 #define pk_coop_battle_starting pk_coopfr_battle_starting
 #define pk_coop_evolve pk_coopfr_evolve
+#define pk_coop_evolve_trade pk_coopfr_evolve_trade
 #define pk_coop_give_mon pk_coopfr_give_mon
 #define pk_coop_install pk_coopfr_install
 #define pk_coop_installed pk_coopfr_installed
@@ -85,6 +86,7 @@
 #define pk_coop_story_forget pk_coopfr_story_forget
 #define pk_coop_story_go pk_coopfr_story_go
 #define pk_coop_story_state pk_coopfr_story_state
+#define pk_coop_trade_mon pk_coopfr_trade_mon
 #define pk_coop_uninstall pk_coopfr_uninstall
 #define pk_coop_white_out pk_coopfr_white_out
 #define pk_coop_write_party_mon pk_coopfr_write_party_mon
