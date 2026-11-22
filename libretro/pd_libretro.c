@@ -2780,8 +2780,12 @@ static void bs_draw(void) {
       clip[3] = CH;
     // A DS pixel a GBA pixel for the foe; the player's own from behind half as big again (the DS games draw it 2x).
     float s = scale * (bsMon[b].back ? 1.5f : 1.0f) * (sx < sy ? sx : sy);
+    // The player's own goes behind the text box as the game's does: a quarter of it under the box's edge.
+    float feet = ground;
+    if (bsMon[b].back)
+      feet = ground - 0.25f * (float)bws_top(bsMon[b].national, true) * 1.5f * (sx < sy ? sx : sy);
     if (bws_draw(bsMon[b].national, bsMon[b].back, bsMon[b].shiny, bsMon[b].t, cvs, CW, clip, ox + e[1] * scale,
-                 oy + ground * scale, s))
+                 oy + feet * scale, s))
       bsActive = true;
   }
 }

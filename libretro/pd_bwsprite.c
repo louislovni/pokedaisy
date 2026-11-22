@@ -511,6 +511,33 @@ static const struct frame *frame_at(const struct frame *fr, const struct seq *s,
   return &fr[s->first + s->count - 1];
 }
 
+int bws_top(int national, bool back) {
+  if (!bws_ready() || national < 1 || national > 649)
+    return 0;
+  struct pic *p = get(national, back);
+  if (!p || !p->mframes || p->mseq.count <= 0)
+    return 0;
+  const struct frame *mf = &p->mframes[p->mseq.first];
+  if (mf->index >= p->nMcs)
+    return 0;
+  const struct mcell *mc = &p->mcs[mf->index];
+  int top = 0;
+  for (int ni = 0; ni < mc->count; ni++) {
+    const struct node *nd = &p->nodes[mc->first + ni];
+    if (nd->seq >= p->nSeqs || p->seqs[nd->seq].count <= 0)
+      continue;
+    const struct frame *f = &p->frames[p->seqs[nd->seq].first];
+    if (f->index >= p->nCells)
+      continue;
+    const struct cell *c = &p->cells[f->index];
+    for (int oi = 0; oi < c->count; oi++) {
+      int y = nd->y + f->py + mf->py + p->oams[c->first + oi].y;
+      top = y < top ? y : top;
+    }
+  }
+  return top;
+}
+
 bool bws_draw(int national, bool back, bool shiny, int t, uint32_t *dst, int stride, const int clip[4], float ox, float oy,
               float scale) {
   if (!bws_ready() || national < 1 || national > 649 || scale <= 0)
