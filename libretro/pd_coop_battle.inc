@@ -18,6 +18,7 @@
 #include "pk_coop_field.h"
 #include "pk_call.h"
 #include "pd_save.h"
+#include "pd_coop_story_spots.h"
 #include <time.h>
 
 /* The French cart's twins (pk_coop_fr_names.h renames every external name of pk_coop*.c: pk_coop_x -> pk_coopfr_x). */
@@ -45,6 +46,12 @@ int pk_coopfr_partner_free(struct mCore *core);
 int pk_coopfr_give_mon(struct mCore *core, const uint8_t mon[100]);
 int pk_coopfr_save_game(struct mCore *core);
 int pk_coopfr_white_out(struct mCore *core);
+int pk_coopfr_story_arm(struct mCore *core, pk_coop_call_fn call, uint16_t trainerId);
+int pk_coopfr_story_state(struct mCore *core);
+int pk_coopfr_story_go(struct mCore *core, struct pk_coop_link_setup *setup);
+int pk_coopfr_story_cancel(struct mCore *core);
+void pk_coopfr_story_disarm(struct mCore *core);
+int pk_coopfr_release_script(struct mCore *core);
 void pk_coopfr_after_set_call(pk_coop_call_fn call);
 void pk_coopfr_after_set_cap(pk_coop_cap_fn cap);
 
@@ -75,19 +82,28 @@ static const struct coop_api {
   int (*white_out)(struct mCore *);
   void (*set_call)(pk_coop_call_fn);
   void (*set_cap)(pk_coop_cap_fn);
+  int (*story_arm)(struct mCore *, pk_coop_call_fn, uint16_t);
+  int (*story_state)(struct mCore *);
+  int (*story_go)(struct mCore *, struct pk_coop_link_setup *);
+  int (*story_cancel)(struct mCore *);
+  void (*story_disarm)(struct mCore *);
+  int (*release_script)(struct mCore *);
   uint32_t battleMoves; /* gBattleMoves (the PP check of a partner's Pokémon) */
 } COOP_EN = {pk_coop_install, pk_coop_refused, pk_coop_link_install, pk_coop_link_refused, pk_coop_link_take,
              pk_coop_link_give, pk_coop_link_state, pk_coop_link_tick, pk_coop_link_bad_blocks, pk_coop_link_leave,
              pk_coop_link_result, pk_coop_link_result_clear, pk_coop_link_reset, pk_coop_link_caught, pk_coop_link_host_hold,
              pk_coop_link_host_go, pk_coop_link_partner_go, pk_coop_on_free_field, pk_coop_join_kind, pk_coop_join_trainers,
              pk_coop_partner_free, pk_coop_give_mon, pk_coop_save_game, pk_coop_white_out, pk_coop_after_set_call,
-             pk_coop_after_set_cap, 0x0831C898u},
+             pk_coop_after_set_cap, pk_coop_story_arm, pk_coop_story_state, pk_coop_story_go, pk_coop_story_cancel,
+             pk_coop_story_disarm, pk_coop_release_script, 0x0831C898u},
   COOP_FR = {pk_coopfr_install, pk_coopfr_refused, pk_coopfr_link_install, pk_coopfr_link_refused, pk_coopfr_link_take,
              pk_coopfr_link_give, pk_coopfr_link_state, pk_coopfr_link_tick, pk_coopfr_link_bad_blocks, pk_coopfr_link_leave,
              pk_coopfr_link_result, pk_coopfr_link_result_clear, pk_coopfr_link_reset, pk_coopfr_link_caught,
              pk_coopfr_link_host_hold, pk_coopfr_link_host_go, pk_coopfr_link_partner_go, pk_coopfr_on_free_field,
              pk_coopfr_join_kind, pk_coopfr_join_trainers, pk_coopfr_partner_free, pk_coopfr_give_mon, pk_coopfr_save_game,
-             pk_coopfr_white_out, pk_coopfr_after_set_call, pk_coopfr_after_set_cap, 0x08324408u};
+             pk_coopfr_white_out, pk_coopfr_after_set_call, pk_coopfr_after_set_cap, pk_coopfr_story_arm,
+             pk_coopfr_story_state, pk_coopfr_story_go, pk_coopfr_story_cancel, pk_coopfr_story_disarm,
+             pk_coopfr_release_script, 0x08324408u};
 
 /* Retail English and French Emerald only (their SHA-1s: the bridge's addresses are those carts'). */
 static const struct coop_api *cb_api(void) {
@@ -242,6 +258,7 @@ static bool cb_decode(int type, const uint8_t *p, int n, struct cb_msg *m) {
     memcpy(m->mon, b + 1, CB_MON);
     return cb_mon_ok(m->mon);
   case CB_STORY_STATE:
+    m->story = left == 1 ? b[0] : -1;
     return left == 1 && b[0] <= 6;
   }
   return false;
@@ -393,7 +410,12 @@ static int cb_able(const uint8_t *party, int count, int slots[3], uint8_t *packe
 }
 
 /* ---- the flow (CoopLinkFlow.kt) ---- */
-enum { CBP_IDLE, CBP_H_ASKING, CBP_H_WAIT, CBP_H_GO, CBP_P_PROMPT, CBP_P_START, CBP_RUNNING, CBP_AFTER };
+enum { CBP_IDLE, CBP_H_ASKING, CBP_H_WAIT, CBP_H_GO, CBP_P_PROMPT, CBP_P_START, CBP_RUNNING, CBP_AFTER, CBP_S_ARMED };
+enum { CBS_IDLE, CBS_ARMED, CBS_PICKING, CBS_READY, CBS_CANCELLED, CBS_MISMATCH, CBS_GO };
+#define CB_STORY 4
+#define CB_STORY_ARM_MS 300000u
+#define CB_STORY_LOOK_MS 100u
+#define CB_ABORT_WAIT_MS 60000u
 #define CB_PROMPT_MS 30000u
 #define CB_START_WAIT_MS 15000u
 #define CB_MAX_GO_TRIES 120
@@ -415,6 +437,14 @@ static struct {
   struct cb_msg answer;
   /* the partner's last STATUS */
   bool partnerFree, partnerReady;
+  int partnerStory;
+  /* story joins */
+  int storyNow, storyDone, storySent, otherStory;
+  uint32_t storySeenAt, lastStoryLook, armDownAt, token;
+  bool storyGoSeen, storyDrop, abortRelease, blackoutOwed;
+  uint32_t lastSpot;
+  int sentStory;
+  bool lbStory; /* the running link battle is a story one (a drop for good is a loss) */
   /* this side's STATUS beat */
   bool ready, sentFree, sentReady;
   uint32_t lastStatus, lastProbe;
@@ -477,6 +507,8 @@ enum { CBO_GIVE, CBO_SAVE, CBO_WHITEOUT };
 
 static void cb_reset(void) {
   cb.phase = CBP_IDLE;
+  cb.storyGoSeen = cb.storyDrop = cb.abortRelease = false;
+  cb.armDownAt = 0;
   cb.kind = 0;
   cb.host = false;
   cb.readyEarly = false;
@@ -631,7 +663,7 @@ static void lb_after_frame(void) {
       return;
     cb_notice("THE LINK DROPPED. THE BATTLE WAS UNDONE.");
     cb_send_cancel(lb.id, CB_CLOSED);
-    lb_finish(false);
+    lb_finish(cb.lbStory); /* a story battle dropped for good is a loss: the game's blackout */
     return;
   }
   if (!lb.endedSeen)
@@ -676,7 +708,7 @@ static void cb_ended(const uint8_t *r, int caughtBy, const uint8_t *caught, bool
     int trainers = r[4] | r[5] << 8 | r[6] | r[7] << 8;
     uint32_t paid = get32(r + 8);
     bool blackout = r[2] & 1;
-    if (trainers || paid || blackout)
+    if (trainers || paid || blackout || (cb.kind == CB_STORY && r[1] == 1))
       cb.wantSave = true;
   }
   cb_ops_load(list, n);
@@ -724,6 +756,24 @@ static void cb_ops_step(void) {
 }
 
 static void cb_after(void) {
+  const struct coop_api *api = cb_api();
+  if (cb.abortRelease && api) {
+    /* a dropped story join: the held script is let go once the game stands on its field, then the blackout and the save */
+    api->set_call(cb_call);
+    int r = api->release_script(core);
+    if (r < 0) {
+      if (cbNow - cb.phaseAt > CB_ABORT_WAIT_MS) {
+        cb_log("story join: the game never freed: the blackout waits for it");
+        cb_reset();
+        cb.blackoutOwed = true;
+      }
+      return;
+    }
+    cb.abortRelease = false;
+    int list[2] = {CBO_WHITEOUT, CBO_SAVE};
+    cb_ops_load(list, 2);
+    return;
+  }
   if (cb.wantSave) {
     cb.wantSave = false;
     if (cb.opCount < 4)
@@ -821,13 +871,15 @@ static bool cb_story_trainer(int id) {
   return false;
 }
 
+static bool cb_send_offer(int k, int trainerA, int trainerB, int species);
+
 static void cb_offer_battle(void) {
   const struct coop_api *api = cb_api();
   int trainers[2] = {0, 0};
   api->join_trainers(core, trainers);
   int k = api->join_kind(core);
   if (k == 4 || (k == 3 && cb_story_trainer(trainers[0])))
-    k = 0; /* a story trainer: not offered as an everyday battle (story joins are not offered from here yet) */
+    k = 0; /* a story trainer: not offered as an everyday battle (a story join is offered where the players stand before it) */
   bool may = k && cb_connected && cb.partnerReady && cb.partnerFree && cb_nearby() && cb.ready;
   char t[128];
   snprintf(t, sizeof t, "battle start held: kind %d, connected %d, partner ready %d free %d, nearby %d, self ready %d", k,
@@ -835,8 +887,6 @@ static void cb_offer_battle(void) {
   cb_log(t);
   if (!may)
     return;
-  struct cb_identity who;
-  cb_identity(&who);
   uint8_t foe[CB_MON];
   int species = 0;
   if (pd_lr_read_memory(core, CB_ENEMY_PARTY, foe, CB_MON)) {
@@ -844,6 +894,14 @@ static void cb_offer_battle(void) {
     pd_box_mon_read(&b, foe);
     species = pd_box_mon_species(&b);
   }
+  cb_send_offer(k, trainers[0], trainers[1], species);
+}
+
+/* An offer out (kind 1-3 from a held battle start, 4 from a story spot): false if it could not be sent. */
+static bool cb_send_offer(int k, int trainerA, int trainerB, int species) {
+  struct cb_identity who;
+  cb_identity(&who);
+  int trainers[2] = {trainerA, trainerB};
   cb.kind = k, cb.trainerA = trainers[0], cb.trainerB = trainers[1];
   do
     cb.id = (uint32_t)rand() & 0x7FFFFFFF;
@@ -860,10 +918,11 @@ static void cb_offer_battle(void) {
   put32(body + 16, who.otId);
   if (!cb_send_id(CB_OFFER, cb.id, body, sizeof body)) {
     cb_reset();
-    return;
+    return false;
   }
   cb.phase = CBP_H_ASKING;
   cb.askedAt = cb.phaseAt = cbNow;
+  return true;
 }
 
 static void cb_fail_start(int reason, bool tell) {
@@ -878,6 +937,16 @@ static void cb_fail_start(int reason, bool tell) {
   cb_reset();
 }
 
+static void cb_armed(void) {
+  cb.phase = CBP_S_ARMED;
+  cb.phaseAt = cbNow;
+  cb.storySent = -1;
+  cb.otherStory = CBS_IDLE;
+  cb.storyGoSeen = false;
+  cb.tries = 0;
+  cb_notice("YOU JOINED. TALK TO THE TRAINER.");
+}
+
 static void cb_accepted(void) {
   const struct coop_api *api = cb_api();
   const struct cb_msg *a = &cb.answer;
@@ -889,6 +958,13 @@ static void cb_accepted(void) {
   if (!(api->install(core) && api->link_install(core, cb_call)))
     return cb_fail_start(CB_ENGINE, true);
   lb_expect(cb.id);
+  if (cb.kind == CB_STORY) {
+    /* a story join: the pick hook goes in; each game runs its own script up to the trainer's battle */
+    if (!api->story_arm(core, cb_call, (uint16_t)cb.trainerA))
+      return cb_fail_start(CB_ENGINE, true);
+    cb_armed();
+    return;
+  }
   cb.phase = cb.readyEarly ? CBP_H_GO : CBP_H_WAIT;
   cb.readyEarly = false;
 }
@@ -907,6 +983,7 @@ static void cb_host_go(void) {
     return cb_fail_start(CB_ENGINE, true);
   struct pk_coop_link_setup s;
   cb_setup_other(&s);
+  cb.lbStory = false;
   int r = lb.active || lb.pumping ? 0 : lb_start(cb.id, api->host_go(core, &s) ? 1 : 0);
   if (r == 1) {
     cb.phase = CBP_RUNNING;
@@ -919,8 +996,13 @@ static void cb_host_go(void) {
 /* ---- the partner ---- */
 static void cb_offered(const struct cb_msg *m) {
   const struct coop_api *api = cb_api();
+  /* two story offers crossed: the lower battle id yields and takes the other's prompt */
+  if (cb.phase == CBP_H_ASKING && cb.kind == CB_STORY && m->kind == CB_STORY && m->id < cb.id) {
+    cb_send_cancel(cb.id, CB_BUSY);
+    cb_reset();
+  }
   bool busy = cb.phase != CBP_IDLE || lb.pumping || !api || !api->partner_free(core);
-  if (busy || !cb.ready || m->kind == 4) {
+  if (busy || !cb.ready) {
     cb_send_cancel(m->id, CB_BUSY);
     return;
   }
@@ -941,7 +1023,8 @@ static void cb_answer(bool accept) {
   int count = cb_party(party), slots[3];
   int n = accept ? cb_able(party, count, slots, packed) : 0;
   bool installed = n > 0 && api->install(core) && api->link_install(core, cb_call);
-  if (!installed) {
+  bool armed = installed && (o->kind != CB_STORY || api->story_arm(core, cb_call, (uint16_t)o->trainerA));
+  if (!armed) {
     uint8_t no = 0;
     cb_send_id(CB_ANSWER, o->id, &no, 1);
     cb_reset();
@@ -969,11 +1052,16 @@ static void cb_answer(bool accept) {
   for (int i = 0; i < n; i++)
     body[k++] = (uint8_t)slots[i];
   if (!cb_send_id(CB_ANSWER, cb.id, body, k)) {
+    if (cb.kind == CB_STORY)
+      api->story_disarm(core);
     cb_reset();
     return;
   }
   lb_expect(cb.id);
-  cb.phase = CBP_P_START;
+  if (cb.kind == CB_STORY)
+    cb_armed();
+  else
+    cb.phase = CBP_P_START;
 }
 
 static void cb_partner_start(void) {
@@ -984,6 +1072,7 @@ static void cb_partner_start(void) {
   s.kind = (uint8_t)cb.kind;
   s.trainerA = (uint16_t)cb.trainerA;
   s.trainerB = (uint16_t)cb.trainerB;
+  cb.lbStory = false;
   int r = lb.active || lb.pumping ? 0 : lb_start(cb.id, api->partner_go(core, &s));
   if (r == 1) {
     cb_send_id(CB_LINK_READY, cb.id, NULL, 0);
@@ -993,6 +1082,161 @@ static void cb_partner_start(void) {
     cb_fail_start(CB_ENGINE, true);
   } else if (cbNow - cb.phaseAt >= CB_START_WAIT_MS) {
     cb_fail_start(CB_TIMEOUT, true);
+  }
+}
+
+/* ---- story joins (CoopLinkFlow's story part): both players stand before the same story trainer ---- */
+
+/* The joinable story event this player stands at (CoopStorySpots.at: the player object's tile less MAP_OFFSET 7; a COORD on its
+ * tile, an OBJECT beside it), its trainer, and whether that trainer's flag is set. 0 = none. */
+static int cb_story_at(int *trainer, bool *beaten) {
+  int32_t self[PK_PARTNER_SELF_N];
+  *trainer = 0, *beaten = true;
+  if (!pk_partner_self(core, self) || !self[PK_PARTNER_SELF_VALID])
+    return 0;
+  int tx = self[PK_PARTNER_SELF_FX] / 16 - 7, ty = self[PK_PARTNER_SELF_FY] / 16 - 7;
+  for (size_t i = 0; i < sizeof CB_STORY_SPOTS / sizeof CB_STORY_SPOTS[0]; i++) {
+    const struct cb_story_spot *e = &CB_STORY_SPOTS[i];
+    if (e->group != self[PK_PARTNER_SELF_GROUP] || e->num != self[PK_PARTNER_SELF_NUM])
+      continue;
+    if (e->object ? abs(e->x - tx) + abs(e->y - ty) != 1 : (e->x != tx || e->y != ty))
+      continue;
+    *trainer = e->trainer;
+    uint32_t sb1 = 0;
+    uint8_t b = 0xFF;
+    int flag = CB_TRAINER_FLAGS_START + e->trainer;
+    if (pd_lr_read_memory(core, 0x03005D8Cu, &sb1, 4) && sb1 >= 0x02000000u && sb1 < 0x02040000u &&
+        pd_lr_read_memory(core, sb1 + CB_SB1_FLAGS_OFF + flag / 8, &b, 1))
+      *beaten = (b >> (flag % 8)) & 1;
+    return e->id;
+  }
+  return 0;
+}
+
+static int cb_story_trainer_of(int eventId) {
+  for (size_t i = 0; i < sizeof CB_STORY_SPOTS / sizeof CB_STORY_SPOTS[0]; i++)
+    if (CB_STORY_SPOTS[i].id == eventId)
+      return CB_STORY_SPOTS[i].trainer;
+  return 0;
+}
+
+/* IDLE: both at the same story spot, neither has beaten its trainer: the one who stood there first offers (a tie: a per-device wait). */
+static void cb_story_idle(void) {
+  if (cbNow - cb.lastStoryLook < CB_STORY_LOOK_MS)
+    return;
+  cb.lastStoryLook = cbNow;
+  int trainer;
+  bool beaten;
+  int mine = cb_story_at(&trainer, &beaten);
+  if (mine != cb.storyDone)
+    cb.storyDone = 0;
+  bool offer = mine && mine == cb.partnerStory && trainer == cb_story_trainer_of(cb.partnerStory) && !beaten &&
+               cb.partnerFree && cb.partnerReady && cb_connected && cb.ready && mine != cb.storyDone;
+  if (!offer) {
+    cb.storySeenAt = 0;
+    return;
+  }
+  if (!cb.storySeenAt) {
+    cb.storySeenAt = cbNow ? cbNow : 1;
+    return;
+  }
+  if (cbNow - cb.storySeenAt < cb.token)
+    return;
+  if (cb_send_offer(CB_STORY, trainer, 0, 0))
+    cb.storyDone = mine;
+}
+
+/* The pick hook goes out: with a team picked or the screen backed out of, the game's own battle starts; else it is just disarmed. */
+static void cb_disarm_story(void) {
+  const struct coop_api *api = cb_api();
+  int st = api->story_state(core);
+  if (st == CBS_READY || st == CBS_CANCELLED)
+    api->story_cancel(core);
+  else
+    api->story_disarm(core);
+}
+
+static void cb_cancel_story(bool tell) {
+  if (tell)
+    cb_send_cancel(cb.id, CB_DECLINED);
+  cb_disarm_story();
+  cb_notice("THE TEAM BATTLE WAS CALLED OFF.");
+  lb_forget();
+  cb_reset();
+}
+
+/* A story join dropped for good before its battle began is a loss for both, never a solo story battle: the hook stays in until the
+ * game reaches it, then goes out WITHOUT the game's own battle, the held script is let go and the game blacks the player out. */
+static void cb_story_drop_tick(void) {
+  const struct coop_api *api = cb_api();
+  int st = api->story_state(core);
+  if (st == CBS_READY || st == CBS_CANCELLED) {
+    api->story_disarm(core);
+    cb.opCount = cb.opAt = 0;
+    cb.abortRelease = true;
+    cb.storyDrop = false;
+    cb.phase = CBP_AFTER;
+    cb.phaseAt = cbNow;
+  } else if (st == CBS_IDLE || st == CBS_MISMATCH) {
+    cb_log("dropped story join: the hook is gone, nothing to black out");
+    cb_reset();
+  }
+}
+
+static void cb_story_tick(void) {
+  const struct coop_api *api = cb_api();
+  if (cb.storyDrop)
+    return cb_story_drop_tick();
+  if (cb.armDownAt) {
+    if (cbNow - cb.armDownAt < CB_DROP_MS)
+      return;
+    cb_log("story join: the link was down 60 s");
+    cb_notice("THE LINK DROPPED. THE BATTLE WAS UNDONE.");
+    lb_forget();
+    cb.armDownAt = 0;
+    cb.storyDrop = true;
+    return;
+  }
+  int st = api->story_state(core);
+  if (st != cb.storySent) {
+    cb.storySent = st;
+    uint8_t b = (uint8_t)st;
+    cb_send_id(CB_STORY_STATE, cb.id, &b, 1);
+  }
+  if (st == CBS_CANCELLED || st == CBS_MISMATCH || st == CBS_IDLE || cbNow - cb.phaseAt >= CB_STORY_ARM_MS)
+    return cb_cancel_story(true);
+  if (st != CBS_READY)
+    return;
+  bool go = cb.host ? cb.otherStory == CBS_READY : cb.storyGoSeen;
+  if (!go)
+    return;
+  struct pk_coop_link_setup s;
+  cb_setup_other(&s);
+  s.master = cb.host ? 1 : 0;
+  int r = lb.active || lb.pumping ? 0 : lb_start(cb.id, api->story_go(core, &s) ? 1 : 0);
+  if (r == 1) {
+    cb.lbStory = true;
+    if (cb.host) {
+      uint8_t b = CBS_GO;
+      cb_send_id(CB_STORY_STATE, cb.id, &b, 1);
+    }
+    cb.phase = CBP_RUNNING;
+    cb.phaseAt = cbNow;
+  } else if (++cb.tries >= CB_MAX_GO_TRIES) {
+    cb_cancel_story(true);
+  }
+}
+
+static void cb_story_message(const struct cb_msg *m, int state) {
+  if (m->id != cb.id || cb.phase != CBP_S_ARMED)
+    return;
+  if (state == CBS_GO) {
+    if (!cb.host) {
+      cb.storyGoSeen = true;
+      cb.tries = 0;
+    }
+  } else {
+    cb.otherStory = state;
   }
 }
 
@@ -1008,6 +1252,14 @@ static void cb_cancelled(int reason) {
     cb_notice("YOUR PARTNER LEFT. THE BATTLE WAS UNDONE.");
     lb_forget();
     cb_reset();
+    break;
+  case CBP_S_ARMED:
+    if (!cb.storyDrop) { /* a dropped join stays dropped */
+      cb_disarm_story();
+      cb_notice("THE TEAM BATTLE WAS CALLED OFF.");
+      lb_forget();
+      cb_reset();
+    }
     break;
   case CBP_P_PROMPT:
     cb_reset();
@@ -1039,7 +1291,7 @@ RETRO_API void retro_pd_coop_battle_in(int type, const uint8_t *p, size_t n) {
     return;
   switch (m.type) {
   case CB_STATUS:
-    cb.partnerFree = m.free, cb.partnerReady = m.ready;
+    cb.partnerFree = m.free, cb.partnerReady = m.ready, cb.partnerStory = m.story;
     break;
   case CB_OFFER:
     cb_offered(&m);
@@ -1082,8 +1334,11 @@ RETRO_API void retro_pd_coop_battle_in(int type, const uint8_t *p, size_t n) {
     if (cb.pending && m.id == cb.pendingId)
       cb.pending = false;
     break;
+  case CB_STORY_STATE:
+    cb_story_message(&m, m.story);
+    break;
   default:
-    break; /* STORY_STATE: no story joins from here yet */
+    break;
   }
 }
 
@@ -1109,6 +1364,13 @@ RETRO_API void retro_pd_coop_battle_link(int connected) {
     if (!up)
       cb_reset();
     break;
+  case CBP_S_ARMED:
+    /* a story join waits a minute for a dead link, then counts as a loss (cb_story_tick) */
+    if (!up && !cb.armDownAt)
+      cb.armDownAt = cbNow ? cbNow : 1;
+    else if (up)
+      cb.armDownAt = 0;
+    break;
   case CBP_RUNNING:
     if (!up && lb.active && !lb.endedSeen && !lb.down) {
       lb.down = true;
@@ -1127,26 +1389,35 @@ static void cb_status(void) {
     cb.statusOnce = false;
     return;
   }
-  bool busy = cb.phase != CBP_IDLE && cb.phase != CBP_P_PROMPT;
+  bool busy = cb.phase == CBP_IDLE ? cb.blackoutOwed
+             : cb.phase != CBP_P_PROMPT && cb.phase != CBP_S_ARMED && !(cb.phase == CBP_H_ASKING && cb.kind == CB_STORY);
   bool fr = !busy && api->partner_free(core);
+  if (cbNow - cb.lastSpot >= 250u || !cb.statusOnce) {
+    cb.lastSpot = cbNow;
+    int trainer;
+    bool beaten;
+    int at = cb_story_at(&trainer, &beaten);
+    cb.storyNow = beaten ? 0 : at;
+  }
   if (fr && (!cb.statusOnce || cbNow - cb.lastProbe >= CB_STATUS_MS)) {
     cb.lastProbe = cbNow;
     cb.ready = api->install(core) && api->link_install(core, cb_call);
   }
   bool rdy = cb.ready && !busy;
-  if (!cb.statusOnce || fr != cb.sentFree || rdy != cb.sentReady || cbNow - cb.lastStatus >= CB_STATUS_MS) {
+  if (!cb.statusOnce || fr != cb.sentFree || rdy != cb.sentReady || cb.storyNow != cb.sentStory ||
+      cbNow - cb.lastStatus >= CB_STATUS_MS) {
     cb.statusOnce = true;
-    cb.lastStatus = cbNow, cb.sentFree = fr, cb.sentReady = rdy;
-    uint8_t body[3] = {(uint8_t)((fr ? 1 : 0) | (rdy ? 2 : 0)), 0, 0};
+    cb.lastStatus = cbNow, cb.sentFree = fr, cb.sentReady = rdy, cb.sentStory = cb.storyNow;
+    uint8_t body[3] = {(uint8_t)((fr ? 1 : 0) | (rdy ? 2 : 0)), (uint8_t)cb.storyNow, (uint8_t)(cb.storyNow >> 8)};
     cb_send_id(CB_STATUS, 0, body, 3);
   }
 }
 
 /* The game is held while the partner is asked / starts (no frame runs). */
-static bool cb_hold(void) { return cb.phase == CBP_H_ASKING || cb.phase == CBP_H_WAIT; }
+static bool cb_hold(void) { return (cb.phase == CBP_H_ASKING && cb.kind != CB_STORY) || cb.phase == CBP_H_WAIT; }
 
 /* The overlay takes the keys while it asks. */
-static bool cb_takes_keys(void) { return cb.phase == CBP_P_PROMPT || cb.phase == CBP_H_ASKING || cb.phase == CBP_H_WAIT; }
+static bool cb_takes_keys(void) { return cb.phase == CBP_P_PROMPT || cb_hold(); }
 
 static uint32_t cb_clock(void) {
   struct timespec t;
@@ -1164,6 +1435,17 @@ static void cb_before_frame(void) {
   switch (cb.phase) {
   case CBP_IDLE:
     cb_late_step();
+    if (cb.blackoutOwed) {
+      /* a story join that dropped while its game never freed: the blackout runs once it does */
+      if (api->free_field(core)) {
+        cb.blackoutOwed = false;
+        int list[2] = {CBO_WHITEOUT, CBO_SAVE};
+        cb_ops_load(list, 2);
+        cb.phase = CBP_AFTER;
+        cb.phaseAt = cbNow;
+      }
+      break;
+    }
     if (!lb.pumping && api->host_hold(core)) {
       if (!cb.startHandled) {
         cb.startHandled = true;
@@ -1171,7 +1453,12 @@ static void cb_before_frame(void) {
       }
     } else {
       cb.startHandled = false;
+      if (!lb.pumping)
+        cb_story_idle();
     }
+    break;
+  case CBP_S_ARMED:
+    cb_story_tick();
     break;
   case CBP_H_ASKING:
     if (cb.accepted)
@@ -1180,7 +1467,7 @@ static void cb_before_frame(void) {
       if (!cb.heard)
         cb_send_cancel(cb.id, CB_TIMEOUT);
       cb_reset();
-    } else if (down(B)) {
+    } else if (down(B) && cb.kind != CB_STORY) {
       cb_send_cancel(cb.id, CB_TIMEOUT);
       cb_reset();
     }
@@ -1222,7 +1509,7 @@ static void cb_before_frame(void) {
 /* Something to draw over the game this frame. */
 static bool cb_overlay(void) {
   return cb_api() && (cb.phase == CBP_P_PROMPT || cb.phase == CBP_H_ASKING || cb.phase == CBP_H_WAIT ||
-                      (lb.active && lb.down && !lb.endedSeen) || (cbNotice[0] && (int32_t)(cbNoticeUntil - cbNow) > 0));
+                      (lb.active && lb.down && !lb.endedSeen) || (cb.phase == CBP_S_ARMED && cb.armDownAt) || (cbNotice[0] && (int32_t)(cbNoticeUntil - cbNow) > 0));
 }
 
 /* After every emulated frame: the block pump. */
@@ -1257,17 +1544,21 @@ static void cb_draw(void) {
   coop_partner_name(partner, sizeof partner);
   if (cb.phase == CBP_P_PROMPT) {
     int left = (int)((CB_PROMPT_MS - (cbNow - cb.phaseAt) + 999) / 1000);
-    snprintf(l1, sizeof l1, "%s IS IN A BATTLE (%d)", partner[0] ? partner : "?", left < 0 ? 0 : left);
+    if (cb.kind == CB_STORY)
+      snprintf(l1, sizeof l1, "%s WANTS A TEAM BATTLE (%d)", partner[0] ? partner : "?", left < 0 ? 0 : left);
+    else
+      snprintf(l1, sizeof l1, "%s IS IN A BATTLE (%d)", partner[0] ? partner : "?", left < 0 ? 0 : left);
     snprintf(l2, sizeof l2, "%s JOIN     %s NO", cb.cursorJoin ? ">" : " ", cb.cursorJoin ? " " : ">");
   } else if (cb.phase == CBP_H_ASKING || cb.phase == CBP_H_WAIT) {
     uint32_t total = cb.phase == CBP_H_ASKING ? CB_PROMPT_MS : CB_START_WAIT_MS;
     uint32_t since = cb.phase == CBP_H_ASKING ? cb.askedAt : cb.phaseAt;
     int left = (int)((total - (cbNow - since) + 999) / 1000);
     snprintf(l1, sizeof l1, "ASKING YOUR PARTNER (%d)", left < 0 ? 0 : left);
-    if (cb.phase == CBP_H_ASKING)
+    if (cb.phase == CBP_H_ASKING && cb.kind != CB_STORY)
       snprintf(l2, sizeof l2, "B: CANCEL");
-  } else if (lb.active && lb.down && !lb.endedSeen) {
-    int left = (int)((CB_DROP_MS - (cbNow - lb.downAt) + 999) / 1000);
+  } else if ((lb.active && lb.down && !lb.endedSeen) || (cb.phase == CBP_S_ARMED && cb.armDownAt && !cb.storyDrop)) {
+    uint32_t at = cb.phase == CBP_S_ARMED ? cb.armDownAt : lb.downAt;
+    int left = (int)((CB_DROP_MS - (cbNow - at) + 999) / 1000);
     snprintf(l1, sizeof l1, "WAITING FOR %s... (%d)", partner[0] ? partner : "?", left < 0 ? 0 : left);
   } else if (cbNotice[0] && (int32_t)(cbNoticeUntil - cbNow) > 0) {
     snprintf(l1, sizeof l1, "%s", cbNotice);
@@ -1303,6 +1594,8 @@ static void cb_draw(void) {
 /* The game closed or changed: nothing carries over (a running link battle was left by the frontend's stop). */
 static void cb_game_changed(void) {
   memset(&cb, 0, sizeof cb);
+  cb.token = (uint32_t)rand() % 1000u; /* two players reaching a story spot together: the shorter wait offers */
+  cb.storySent = -1;
   lb_reset();
   lb.expected = 0;
   cbOut.head = cbOut.tail = cbOut.used = cbOut.count = 0;
@@ -1315,7 +1608,13 @@ RETRO_API void retro_pd_test_write(uint32_t a, const uint8_t *in, int n) {
   for (int i = 0; core && i < n; i++)
     core->busWrite8(core, a + (uint32_t)i, in[i]);
 }
-RETRO_API int retro_pd_test_phase(void) { return cb.phase | (lb.active ? 0x100 : 0) | (lb.pumping ? 0x200 : 0); }
+RETRO_API int retro_pd_test_phase(void) {
+  const struct coop_api *api = cb_api();
+  uint8_t r[PK_COOP_LINK_RESULT_SIZE];
+  int st = api ? api->state(core) : 0, res = api && api->result(core, r, sizeof r) == PK_COOP_LINK_RESULT_SIZE;
+  return cb.phase | (lb.active ? 0x100 : 0) | (lb.pumping ? 0x200 : 0) | (lb.endedSeen ? 0x400 : 0) | (res ? 0x800 : 0) |
+         st << 12 | (api && api->free_field(core) ? 0x10000 : 0) | lb.endFrames << 20;
+}
 #endif
 
 #else

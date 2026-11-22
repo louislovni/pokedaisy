@@ -208,7 +208,9 @@ void pk_coop_link_start_patches_out(struct mCore* core) {
 void pk_coop_link_start_ids(struct mCore* core, const struct pk_coop_link_setup* setup) {
     // The real ids: the tower flow's name / picture / class lookups are answered from gTrainers while the bridge's hooks are in.
     core->busWrite16(core, COOP_EM_gTrainerBattleOpponent_A, setup->trainerA);
-    core->busWrite16(core, COOP_EM_gTrainerBattleOpponent_B, setup->kind == PK_COOP_LINK_SINGLE ? setup->trainerA : setup->trainerB);
+    // One trainer over both foe slots (SINGLE, a story trainer alone): B is A again, its name, picture and AI on both sides.
+    int one = setup->kind == PK_COOP_LINK_SINGLE || (setup->kind == PK_COOP_LINK_STORY && !setup->trainerB);
+    core->busWrite16(core, COOP_EM_gTrainerBattleOpponent_B, one ? setup->trainerA : setup->trainerB);
 }
 
 int pk_coop_link_start_single_party(struct mCore* core, pk_coop_call_fn call, uint16_t trainer) {

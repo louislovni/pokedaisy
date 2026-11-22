@@ -1947,7 +1947,7 @@ const struct pd_tr_entry pd_tr_fr[2430] = {
     { "THE GAME COULD NOT BE SAVED.", "SAUVEGARDE IMPOSSIBLE." },
     { "THE LINK DROPPED. THE BATTLE WAS UNDONE.", "LIEN PERDU, COMBAT ANNULÉ." },
     { "THE PC, FROM ANYWHERE", "LE PC, OÙ QUE VOUS SOYEZ" },
-    { "THE TEAM BATTLE WAS CALLED OFF.", "LE COMBAT À DEUX A ÉTÉ ANNULÉ." },
+    { "THE TEAM BATTLE WAS CALLED OFF.", "LE COMBAT À DEUX EST ANNULÉ." },
     { "THEME", "THÈME" },
     { "THERMAL", "CHALEUR" },
     { "THIS MAP", "CETTE CARTE" },
@@ -2335,7 +2335,7 @@ const struct pd_tr_entry pd_tr_fr[2430] = {
     { "YELLOW FLOWERS", "FLEURS JAUNES" },
     { "YES", "OUI" },
     { "YOU", "TOI" },
-    { "YOU JOINED. TALK TO THE TRAINER.", "TU AS REJOINT. PARLE AU DRESSEUR." },
+    { "YOU JOINED. TALK TO THE TRAINER.", "C'EST PARTI. PARLE AU DRESSEUR." },
     { "YOUR ADDRESS", "TON ADRESSE" },
     { "YOUR GAMES", "TES JEUX" },
     { "YOUR LOCATION", "TA POSITION" },
@@ -2435,7 +2435,7 @@ const struct pd_tr_entry pd_tr_fr[2430] = {
 };
 const int pd_tr_fr_count = 2430;
 
-const struct pd_tr_entry pd_tr_fr_formats[381] = {
+const struct pd_tr_entry pd_tr_fr_formats[382] = {
     { "A frame around the game. %s and %s are PokéDaisy's own. %s adds yours: a RetroArch overlay (.cfg with its PNG), a .zip of them, or a PNG with a see-through screen.", "Un cadre autour du jeu. {0} et {1} sont ceux de PokéDaisy. {2} ajoute les vôtres : une surimpression RetroArch (.cfg avec son PNG), un .zip de celles-ci, ou un PNG avec un écran transparent." },
     { "This patch is for a %s ROM with CRC32 %s, and no ROM in your library has that checksum. Add that ROM to your library or a ROMs folder, then try again.", "Ce patch est pour une ROM de {0} au CRC32 {1}, et aucune ROM de votre bibliothèque n'a cette somme de contrôle. Ajoutez cette ROM à votre bibliothèque ou à un dossier de ROM, puis réessayez." },
     { "This patch is for %s (CRC32 %s), and no ROM in your library has that checksum. Add that ROM to your library or a ROMs folder, then try again.", "Ce patch est pour {0} (CRC32 {1}), et aucune ROM de votre bibliothèque n'a cette somme de contrôle. Ajoutez cette ROM à votre bibliothèque ou à un dossier de ROM, puis réessayez." },
@@ -2560,6 +2560,7 @@ const struct pd_tr_entry pd_tr_fr_formats[381] = {
     { "Still working: %s steps left", "Encore actif : {0} pas restants" },
     { "Take the MAIL from %s first.", "Retirez d'abord la LETTRE de {0}." },
     { "%s STARTED A BATTLE NEARBY.", "{0} A LANCÉ UN COMBAT PRÈS D'ICI." },
+    { "%s WANTS A TEAM BATTLE (%d)", "{0} : COMBAT À DEUX ? ({1})" },
     { "Controller disconnected: %s", "Manette déconnectée : {0}" },
     { "DONE — %s NEW, %s UNCHANGED", "TERMINÉ — {0} NOUVELLES, {1} INCHANGÉES" },
     { "Partly (best effort, as %s)", "En partie (essai, comme {0})" },
@@ -2818,4 +2819,4 @@ const struct pd_tr_entry pd_tr_fr_formats[381] = {
     { "Lv%d", "N.{0}" },
     { "Lv%s", "N.{0}" },
 };
-const int pd_tr_fr_format_count = 381;
+const int pd_tr_fr_format_count = 382;

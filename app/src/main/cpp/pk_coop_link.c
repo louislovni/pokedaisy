@@ -669,9 +669,10 @@ int pk_coop_link_begin(struct mCore* core, const struct pk_coop_link_setup* setu
     // GetFrontierTrainerFrontSpriteId; an id of a route trainer, 300 and up, indexes the record-mixing tables with a junk number and
     // the name copy runs over other EWRAM): two Frontier trainers stand in until the later tasks put the real trainers' names and
     // pictures in. The parties above are the real trainers' (setup->trainerA / B, gTrainers ids).
-    if (setup->kind == PK_COOP_LINK_TRAINERS || setup->kind == PK_COOP_LINK_SINGLE) {
+    if (setup->kind == PK_COOP_LINK_TRAINERS || setup->kind == PK_COOP_LINK_SINGLE || setup->kind == PK_COOP_LINK_STORY) {
         // task 2: trainer battles show the real trainers: the ids go in as they are (the tower flow's lookups are answered from
         // gTrainers while the hooks are in, scripts/coop_link_emerald.s), so the host's script flags the right ones at the end.
+        // A story battle too (the stand-ins showed trainers 0 and 1: a nameless PKMN TRAINER drawn as a HIKER, with their AI).
         pk_coop_link_start_ids(core, setup);
     } else {
         link_write(core, COOP_EM_gTrainerBattleOpponent_A, LINK_FACILITY_TRAINER_A, 2);

@@ -2966,8 +2966,12 @@ glue: stop order and fail-closed stops, busy / state blocks, message hopping, ST
 pre-included header (`pk_coop_en_names.h` / `pk_coop_fr_names.h`; the French one also pre-includes `pk_coop_emerald_fr.h`,
 `scripts/gen_coop_emerald_fr.py`'s map of the French cart). `pk_coop_dispatch.c` gives the app the usual `pk_coop_*` calls and hands
 each to the loaded cart's build (ROM 0x080000AF 'F'); reset / uninstall / the call hooks go to both. All three files come from
-`scripts/gen_coop_dispatch.py`. Story joins stay English only (the lock's addresses): `storyAt` is NONE on French Emerald. The
-libretro core (Capsule) links both builds without the dispatcher: `libretro/pd_coop_battle.inc` picks by the ROM's SHA-1.
+`scripts/gen_coop_dispatch.py`. Story joins work on both carts (the story spots are map coordinates, the story hook's addresses
+are in each cart's header); only the lock (PLAY TOGETHER ONLY's hold, `pk_coop_lock_emerald.h`) stays English. The libretro core
+(Capsule) links both builds without the dispatcher: `libretro/pd_coop_battle.inc` picks by the ROM's SHA-1 and ports CoopLinkFlow's
+story part (`libretro/pd_coop_story_spots.h` from `scripts/gen_coop_story_spots.py`). A story battle shows its real trainer
+(`pk_coop_link_start_ids` for STORY too, B = A for one trainer); the stand-in Frontier ids 0 / 1 showed a nameless HIKER with that
+trainer's AI.
 
 ### The link bridge (a joined battle as a link battle)
 
