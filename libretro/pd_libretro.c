@@ -525,7 +525,9 @@ static void dim(int alpha) {
 /* Convert and hand the finished canvas to the frontend. */
 // Only a gameplay frame at the current geometry may be repeated.
 static bool canDupe, haveGameFrame, repeatedFrame;
+static void cb_draw(void);
 static void present(void) {
+  cb_draw();
   if (messageFrames > 0) {
     pd_fill(&canvas, 4, CH - 50, CW - 8, 24, 0x181818);
     pd_text_fit(&canvas, 10, CH - 46, CW - 20, message, 0xffffff, PD_NO_SHADOW);
@@ -713,6 +715,8 @@ static void snapshot(void) { pd_snapshot_read(&snap, &game, pd_lr_read_memory, c
 
 /* Co-op presence: the frontend's retro_pd_coop_* (Capsule on iPhone / PC). */
 #include "pd_coop.inc"
+/* Co-op joined battles over the same link (pd_coop_battle.inc). */
+#include "pd_coop_battle.inc"
 
 /* pk_flight told the profile's words with FLY ON's vehicle (again only when it changed). */
 static void flight_configure_words(void) {
@@ -1270,6 +1274,7 @@ RETRO_API bool retro_load_game(const struct retro_game_info *g) {
 #ifndef PD_ARMGBA
   coop_game_changed();
 #endif
+  cb_game_changed();
   wildSwitch = fieldKnown ? pk_wild_switch_find(rom, len) : 0;
   if (wildSwitch)
     pk_field_wild(wildSwitch, settings.wildOff);
@@ -2116,11 +2121,12 @@ RETRO_API void retro_run(void) {
   }
   if (polishedActions && companion && pd_binput_busy(&polishedInput))
     companion = false; // The native battle / Bag / party resumes with the selected action.
-  bool paused = COMPANION_OVER || hudFocus || (quickOpen && !flyAsk);
+  cb_before_frame(); // co-op joined battles: the offer / prompt / start steps (pd_coop_battle.inc), every tick
+  bool paused = COMPANION_OVER || hudFocus || (quickOpen && !flyAsk) || cb_hold();
   const bool expanded = wideSupported && settings.aspect != PD_ASPECT_ORIGINAL;
   const bool repeat = late && canDupe && haveGameFrame && !paused && !quickOpen &&
                       (!ff || (expanded && !repeatedFrame));
-  maskGame = paused || companion; // docked, the game runs on but the keys are the companion's
+  maskGame = paused || companion || cb_takes_keys(); // docked, the game runs on but the keys are the companion's
   shortcutExclusive = false;
   if (!paused) {
     if (polishedActions && !rewinding && settings.wildOff &&
@@ -2149,6 +2155,7 @@ RETRO_API void retro_run(void) {
                       ? 1u << B : 0;
     PF_T(pa);
     mgba_retro_run();
+    cb_after_frame();
     bs_after_run();
     autoRunFlip = 0;
     if (freeFlight)
@@ -2401,7 +2408,7 @@ RETRO_API void retro_run(void) {
         blend_overlay_area(ovPixels, qc.w, qc.h, ovScratch);
     }
   } else {
-    direct565 = messageFrames == 0 && !bs_wanted();
+    direct565 = messageFrames == 0 && !bs_wanted() && !cb_overlay();
     if (direct565)
       draw_game_fast();
     else
