@@ -536,7 +536,8 @@ void pd_snapshot_read(struct pd_snapshot* s, const struct pd_game* g, pd_read_fn
                 if (p == PD_POS_OPPONENT_LEFT) foeBattler = b;
             }
         }
-        if (s->isTrainer && cfg->enemyParty) read_foes(s, cfg, read, ctx, foeBattler);
+        // A wild foe's too (its IVs for FOE DETAILS); the FOE TEAM strip stays a trainer's.
+        if (cfg->enemyParty) read_foes(s, cfg, read, ctx, foeBattler);
     }
 
     // --- location ---

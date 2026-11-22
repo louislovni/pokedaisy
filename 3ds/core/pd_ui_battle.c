@@ -15,6 +15,7 @@
 #include "pd_dex.h"
 #include "pd_icon.h"
 #include "pd_tables.h"
+#include "pd_tr.h"
 #include "pd_ui_internal.h"
 
 #define BAR_H 34
@@ -219,14 +220,16 @@ static bool caught_species(const struct battle_data* d, const struct pd_snapshot
 static void side_card(struct pd_canvas* c, const struct battle_data* d, int x, int y, int w, const struct mon_view* m,
                       const char* side, const char* state, bool caught) {
     char buf[40];
-    pd_text(c, x, y - 2, side, PD_VALUE, PD_VALUE_SHADOW);
+    int sideW = pd_text(c, x, y - 2, side, PD_VALUE, PD_VALUE_SHADOW);
     icon(c, d, m->species, m->shiny, x, y + 12, false);
     int tx = x + PD_ICON + 2 + 5, right = x + w;
+    // A longer side label (a translation's: SAUVAGE) pushes the name along, never under it.
+    int nx = x + sideW + 5 > tx ? x + sideW + 5 : tx;
     int stateW = state && *state ? pd_text_width(state) + 6 : 0;
     if (stateW) pill(c, right - stateW, y - 1, state, VERDICT_GREY);
     const char* status = pd_status_label(m->status);
     int statusW = *status ? pd_text_width(status) + 6 + 3 : 0, ballW = caught ? 13 : 0;
-    int nameEnd = tx + pd_text_fit(c, tx, y - 2, right - tx - stateW - statusW - ballW - (stateW ? 3 : 0),
+    int nameEnd = nx + pd_text_fit(c, nx, y - 2, right - nx - stateW - statusW - ballW - (stateW ? 3 : 0),
                                    species_name(d, m->species, buf, sizeof(buf)), PD_LABEL, PD_LABEL_SHADOW);
     if (m->shiny) nameEnd += pd_text(c, nameEnd + 2, y - 2, "*", SHINY_FRAME, PD_LABEL_SHADOW) + 2;
     if (caught) {
@@ -324,6 +327,12 @@ static void matchups(struct pd_canvas* c, const struct battle_data* d, const str
             int nl = 0;
             for (; name[nl] && nl < 12; nl++) chip[nl] = name[nl] >= 'a' && name[nl] <= 'z' ? (char) (name[nl] - 32) : name[nl];
             chip[nl] = 0;
+            {
+                char word[24];
+                snprintf(word, sizeof(word), "%s", ui_type_word(chip));
+                snprintf(chip, sizeof(chip), "%s", word);
+            }
+            nl = (int) strlen(chip);
             if (g < 2) snprintf(chip + nl, sizeof(chip) - (size_t) nl, " %s", multiplier(pcts[i]));
             int cw = pd_text_width(chip) + 6;
             if (cx + cw > x + w && cx > x) {
@@ -351,7 +360,7 @@ static void nav_button(struct pd_ui* ui, struct pd_canvas* c, int x, int y, int 
 // The FOE TEAM, from x to the right edge.
 static void foe_strip(struct pd_ui* ui, struct pd_canvas* c, const struct battle_data* d, const struct pd_snapshot* s,
                       int x, int y, int right) {
-    if (s->foeCount < 2) return;
+    if (!s->isTrainer || s->foeCount < 2) return;
     int cell = BAR_H, gap = 3;
     int need = s->foeCount * cell + (s->foeCount - 1) * gap;
     if (right - x < need) cell = (right - x - (s->foeCount - 1) * gap) / s->foeCount;
@@ -582,6 +591,40 @@ static int foe_facts(struct pd_canvas* c, const struct battle_data* d, const str
     return h + 29;
 }
 
+// The foe out's IVs (gEnemyParty: a wild one's too) and its nature, as the summary's STATS has them. Returns the height drawn.
+static int foe_ivs(struct pd_canvas* c, const struct battle_data* d, const struct pd_snapshot* s, int x, int y, int w) {
+    (void) d;
+    if (s->foeActive < 0 || s->foeActive >= s->foeCount) return 0;
+    const struct pd_mon_stats* st = &s->foes[s->foeActive].stats;
+    if (!st->valid || !st->hasIvs) return 0;
+    pd_text(c, x, y - 2, "IVS", PD_LABEL, PD_LABEL_SHADOW);
+    if (st->hasNature && st->nature >= 0 && st->nature < pd_nature_names_count) {
+        int nw = pd_text(c, x + w / 2, y - 2, "NATURE", PD_LABEL, PD_LABEL_SHADOW) + 4;
+        static const char* const FR[25] = { "HARDI", "SOLO", "BRAVE", "RIGIDE", "MAUVAIS", "ASSURE", "DOCILE", "RELAX",
+                                            "MALIN", "LACHE", "TIMIDE", "PRESSE", "SERIEUX", "JOVIAL", "NAIF", "MODESTE",
+                                            "DOUX", "DISCRET", "PUDIQUE", "FOUFOU", "CALME", "GENTIL", "MALPOLI", "PRUDENT",
+                                            "BIZARRE" };
+        const char* lang = pd_tr_language();
+        const char* nature = lang && !strcmp(lang, "fr") && st->nature < 25 ? FR[st->nature] : pd_nature_names[st->nature];
+        pd_text_fit(c, x + w / 2 + nw, y - 2, w / 2 - nw, nature, PD_VALUE, PD_VALUE_SHADOW);
+    }
+    // HP, then the summary's order: Attack, Defense, Sp. Atk, Sp. Def, Speed (the IVs' own: HP, Atk, Def, Speed, Sp. Atk, Sp. Def).
+    static const int ORDER[6] = { 0, 1, 2, 4, 5, 3 };
+    static const char* const LABELS_EN[6] = { "HP", "ATK", "DEF", "SP.A", "SP.D", "SPE" };
+    static const char* const LABELS_FR[6] = { "PV", "ATQ", "DEF", "A.SP", "D.SP", "VIT" };
+    const char* lang2 = pd_tr_language();
+    const char* const* LABELS = lang2 && !strcmp(lang2, "fr") ? LABELS_FR : LABELS_EN;
+    int col = w / 6;
+    for (int k = 0; k < 6; k++) {
+        int cx = x + k * col;
+        pd_text_fit(c, cx, y + 13, col - 2, LABELS[k], PD_LABEL, PD_LABEL_SHADOW);
+        char v[8];
+        snprintf(v, sizeof(v), "%d", st->ivs[ORDER[k]]);
+        pd_text(c, cx, y + 27, v, st->ivs[ORDER[k]] == 31 ? SHINY_FRAME : PD_VALUE, PD_VALUE_SHADOW);
+    }
+    return 44;
+}
+
 // FOE DETAILS (the expand button): your side shrinks to a strip - YOU, the icon, the HP standing up - and the foe gets the
 // page: its card, its facts, its moves with what each does to you, then its matchups where there's room.
 static void foe_details(struct pd_canvas* c, const struct battle_data* d, const struct pd_snapshot* s, const struct mon_view* foe,
@@ -617,6 +660,7 @@ static void foe_details(struct pd_canvas* c, const struct battle_data* d, const 
     separator(c, rx, y, rw, false);
     y += 5;
     y += foe_facts(c, d, foeBattler, rx, y, rw);
+    y += foe_ivs(c, d, s, rx, y, rw);
     int bottom = iy + ih;
     // The foe's moves two by two, a row each pair.
     // The floating expand button sits in the bottom right corner: a row beside it keeps clear of it (FoeDetailsColumn's

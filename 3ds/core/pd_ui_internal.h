@@ -284,6 +284,8 @@ void ui_platinum_back(struct pd_canvas* c, int x, int y, int w, int h);
 void ui_fade_rect(struct pd_canvas* c, const uint32_t* before, int x, int y, int w, int h, int alpha);
 // A type's colour (AppColors.typeColors), and its badge: returns the width.
 uint32_t ui_type_color(int type);
+// A type's name as shown (upper case in, the language's word out: FIRE -> FEU in French).
+const char* ui_type_word(const char* upper);
 int ui_type_badge(struct pd_canvas* c, int x, int y, int type);
 
 // The lists' caught / seen mark: a Poké Ball, or a grey one.

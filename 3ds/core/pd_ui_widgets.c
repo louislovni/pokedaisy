@@ -4,6 +4,7 @@
 #include "pd_party_art.h"
 #include "pd_tables.h"
 #include "pd_ui_internal.h"
+#include "pd_tr.h"
 
 #define HP_FRAME 0x525252
 #define HP_LABEL 0xFFD652
@@ -113,6 +114,21 @@ uint32_t ui_type_color(int type) {
     return type >= 0 && type < 18 ? COLORS[type] : PD_MUTED;
 }
 
+const char* ui_type_word(const char* upper) {
+    // French: the games' own type names (pd_tr's table has other senses for some: GRASS is the guide's HERBES).
+    const char* lang = pd_tr_language();
+    if (lang && !strcmp(lang, "fr")) {
+        static const char* const FR[][2] = {
+            {"FIGHTING", "COMBAT"}, {"FLYING", "VOL"}, {"GROUND", "SOL"}, {"ROCK", "ROCHE"}, {"BUG", "INSECTE"},
+            {"GHOST", "SPECTRE"}, {"STEEL", "ACIER"}, {"FIRE", "FEU"}, {"WATER", "EAU"}, {"GRASS", "PLANTE"},
+            {"ELECTRIC", "ELECTRIK"}, {"PSYCHIC", "PSY"}, {"ICE", "GLACE"}, {"DARK", "TENEBRES"}, {"FAIRY", "FEE"},
+        };
+        for (size_t i = 0; i < sizeof FR / sizeof FR[0]; i++)
+            if (!strcmp(upper, FR[i][0])) return FR[i][1];
+    }
+    return upper;
+}
+
 int ui_type_badge(struct pd_canvas* c, int x, int y, int type) {
     char text[12];
     const char* name = pd_type_name(ui_game, type);
@@ -130,6 +146,11 @@ int ui_type_badge(struct pd_canvas* c, int x, int y, int type) {
                     if (v) pd_fill(c, x + i, y + r, 1, 1, v & 0xFFFFFF);
                 }
         return 32;
+    }
+    {
+        char word[12];
+        snprintf(word, sizeof word, "%s", ui_type_word(text));
+        snprintf(text, sizeof text, "%s", word);
     }
     int w = pd_text_width(text) + 6;
     if (!c) return w; // measuring
