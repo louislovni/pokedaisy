@@ -2858,7 +2858,11 @@ static bool bs_wanted(void) { return false; }
 #ifndef PD_ARMGBA
 #include "pd_dsweather.h"
 static bool ambDsWeather = true;
-static int ambSeasons;              /* 0 off, 1 Black / White's, 2 the calendar's */
+/* 0 off, 1 Black / White's (a new one each month), 2 the calendar's, 3-6 always spring / summer / autumn / winter,
+ * 7 a new one every 20 minutes of play, 8 each area its own */
+static int ambSeasons;
+static int ambSeasonShown = -1;     /* the season whose colours are up (a change fades them out, then the new ones in) */
+static uint32_t ambPlayFrames;      /* the field frames played (the 20 minutes' clock without the game's own) */
 static int ambKind = -1;            /* the DS weather drawn this frame (DSW_*) */
 static int ambSeasonDrawn = -1;     /* the season's particles drawn this frame */
 static int ambSeasonK;              /* the season's colours, 0..256 */
@@ -2871,7 +2875,7 @@ RETRO_API void retro_pd_weather_cart(const char *ndsPath) {
 }
 RETRO_API void retro_pd_ambience(int dsWeather, int seasons) {
   ambDsWeather = dsWeather != 0;
-  ambSeasons = seasons >= 1 && seasons <= 6 ? seasons : 0; // 3-6: one season always (spring ... winter)
+  ambSeasons = seasons >= 1 && seasons <= 8 ? seasons : 0;
 }
 
 static bool amb_outdoors(void) {
@@ -2922,17 +2926,47 @@ static void amb_after_run(void) {
   const bool field = amb_field();
   ambKind = ambDsWeather && dsw_ready() && field && amb_hides() ? amb_kind(snap.weather) : DSW_NONE;
   pk_wide_weather_hide(ambKind >= 0 ? amb_game_sprites(ambKind) : 0);
-  const int season = haveGame && PD_BE_IS_GBA() ? dsw_season_now(ambSeasons) : SEASON_NONE;
+  if (field)
+    ambPlayFrames++;
+  int season = SEASON_NONE;
+  if (haveGame && PD_BE_IS_GBA()) {
+    if (ambSeasons == 7) {
+      // Every 20 minutes of play: the game's play time where it's read (the TRAINER CARD's games: it goes on from save
+      // to save), else the field frames played since the game started.
+      const uint32_t minutes = snap.cardOk ? (uint32_t)snap.playHours * 60u + snap.playMinutes : ambPlayFrames / 3600u;
+      season = (int)(minutes / 20u % 4u);
+    } else if (ambSeasons == 8) {
+      // Each area its own: the map section's (a town and its buildings, a route), mixed so neighbours differ.
+      season = snap.mapsec >= 0 ? (int)(((uint32_t)snap.mapsec * 2654435761u) >> 30) : SEASON_NONE;
+    } else
+      season = dsw_season_now(ambSeasons);
+  }
   // The map's colours: in on the field outdoors (eased, mostly while a door's or a menu's fade comes back), off at once
-  // elsewhere (a menu's own green windows are BG palettes too).
+  // elsewhere (a menu's own green windows are BG palettes too). A new season on the field fades the old one out first.
   const bool colours = season >= 0 && field;
-  ambSeasonK = colours ? (ambSeasonK + 32 > 256 ? 256 : ambSeasonK + 32) : 0;
-  pk_season_set(colours ? season : -1, ambSeasonK);
+  static bool changing; // a season changing on screen: slowly out and in (about a second), not a door's quick fade
+  if (!colours) {
+    ambSeasonK = 0;
+    ambSeasonShown = season;
+    changing = false;
+  } else if (season != ambSeasonShown && ambSeasonK > 0) {
+    changing = true;
+    ambSeasonK = ambSeasonK > 8 ? ambSeasonK - 8 : 0;
+  } else {
+    ambSeasonShown = season;
+    const int step = changing ? 8 : 32;
+    ambSeasonK = ambSeasonK + step >= 256 ? 256 : ambSeasonK + step;
+    if (ambSeasonK == 256)
+      changing = false;
+  }
+  pk_season_set(colours ? ambSeasonShown : -1, ambSeasonK);
   const int w = snap.weather;
   const bool fine = w == 0 || w == 1 || w == 2;
-  ambSeasonDrawn = field && fine && ambKind < 0 && season >= 0 && season != SEASON_SUMMER ? season : -1;
-  if (!haveGame)
+  ambSeasonDrawn = field && fine && ambKind < 0 && ambSeasonShown >= 0 && ambSeasonShown != SEASON_SUMMER ? ambSeasonShown : -1;
+  if (!haveGame) {
     dsw_reset();
+    ambPlayFrames = 0;
+  }
 }
 static void amb_plot(int x, int y, uint32_t rgb, int a) {
   if (x < 0 || y < 0 || x >= CW || y >= CH)

@@ -500,7 +500,8 @@ static struct {
   bool weatherFx;    // WEATHER AND LIGHTS (Capsule's build, capsule_fx.h)
   bool battleSprites; // BATTLE SPRITES (Capsule's build): Black / White's animated pictures in Emerald's battles
   bool dsWeather;     // DS WEATHER (Capsule's build): HeartGold / SoulSilver's rain, snow and sand in place of the game's
-  int seasons;        // SEASONS (Capsule's build): 0 off, 1 Black / White's (a new one each month), 2 the calendar's
+  int seasons;        // SEASONS (Capsule's build): retro_pd_ambience's: 0 off, 1 Black / White's (a new one each month), 2 the
+                      // calendar's, 3-6 always spring / summer / autumn / winter, 7 every 20 minutes of play, 8 by area
 } hostSet = {0, false, false, false, {R2, L2, -1, -1}, {R2, L2, -1, -1}, SELECT, true, 0, true, true, true, 1};
 static char hostIni[PATH_MAX];
 /* A DS game's L2 / R2 are its companion and screen buttons: with no modifier held for them, its FAST FORWARD and REWIND
@@ -547,7 +548,7 @@ static void host_load(void) {
     if (sscanf(line, "ds_weather=%d", &v) == 1)
       hostSet.dsWeather = v != 0;
     if (sscanf(line, "seasons=%d", &v) == 1)
-      hostSet.seasons = v >= 0 && v <= 2 ? v : 1;
+      hostSet.seasons = v >= 0 && v <= 8 ? v : 1;
     if (sscanf(line, "swap_ab=%d", &v) == 1)
       hostSet.swapAB = v != 0;
     for (int i = 0; i < KB_BINDS; i++) { // kb_<id>=<SDL key name> (the KEYS page)
@@ -1998,8 +1999,9 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     snprintf(rows[M_WEATHER], 40, "%s  %s", pd_tr("WEATHER AND LIGHTS"), ONOFF(hostSet.weatherFx));
     snprintf(rows[M_SPRITES], 40, "%s  %s", pd_tr("BATTLE SPRITES"), ONOFF(hostSet.battleSprites));
     snprintf(rows[M_DSWEATHER], 40, "%s  %s", pd_tr("DS WEATHER"), ONOFF(hostSet.dsWeather));
-    snprintf(rows[M_SEASONS], 40, "%s  %s", pd_tr("SEASONS"),
-             pd_tr(hostSet.seasons == 1 ? "BLACK AND WHITE" : hostSet.seasons == 2 ? "CALENDAR" : "OFF"));
+    static const char *const SEASON_NAMES[9] = {"OFF",    "BLACK AND WHITE", "CALENDAR", "SPRING",  "SUMMER",
+                                                "AUTUMN", "WINTER",          "EVERY 20 MIN", "BY AREA"};
+    snprintf(rows[M_SEASONS], 40, "%s  %s", pd_tr("SEASONS"), pd_tr(SEASON_NAMES[hostSet.seasons % 9]));
     snprintf(rows[M_SWAP], 40, "%s  %s", pd_tr("CONTROLLER A/B"), pd_tr(hostSet.swapAB ? "SWAPPED" : "NORMAL"));
     snprintf(rows[M_HOTKEYS], 40, "%s", pd_tr("CONTROLLER HOTKEYS"));
     snprintf(rows[M_KEYS], 40, "%s", pd_tr("KEYBOARD KEYS"));
@@ -2284,7 +2286,11 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
           if (menuMap[menu.selected] == M_DSWEATHER)
             hostSet.dsWeather = !hostSet.dsWeather;
           else
-            hostSet.seasons = (hostSet.seasons + 1) % 3;
+          {
+            // The menu's order: off, Black / White, the calendar, every 20 minutes, by area, then each season.
+            static const int NEXT[9] = {1, 2, 7, 4, 5, 6, 0, 8, 3};
+            hostSet.seasons = NEXT[hostSet.seasons % 9];
+          }
           host_save();
 #ifdef POCKET_PURE
           ambience_follow(path);

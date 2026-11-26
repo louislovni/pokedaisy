@@ -32,7 +32,8 @@ void dsw_season(int season, const struct dsw_target *t);
 void dsw_reset(void);
 
 /* The season today: [mode] 1 Black / White's (a new one each month: January spring, February summer, March autumn, April
- * winter, and again), 2 the calendar's (northern: March-May spring ...); SEASON_NONE for 0. */
+ * winter, and again), 2 the calendar's (northern: March-May spring ...), 3-6 that season always; SEASON_NONE for others
+ * (0 off; 7 and 8, by play time and by area, are the core's). */
 int dsw_season_now(int mode);
 
 #endif
