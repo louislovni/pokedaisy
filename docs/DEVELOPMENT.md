@@ -2979,7 +2979,10 @@ co-op Emerald with the partner linked and free. Both games are held while the pl
 other's record into its slot (`pk_coop_trade_mon`: the 100 bytes as they came, OT kept, the species SEEN / CAUGHT), saves and sends
 DONE (0x0223, resent until ACK 0x0224); the initiator does the same on DONE, however late (kept in memory). Each side checks the
 record (the joined battles' `cb_mon_ok`) and that its own slot still holds what it offered; a trade evolution follows
-(`pk_coop_evolve_trade`, EVO_MODE_TRADE) and a second save. The Android app does the same (`CoopTrade.kt`'s `CoopTradeFlow`, run by the battle glue; QUICK MENU > TRADE, `MgbaCore.pkCoopTradeMon` / `pkCoopEvolveTrade`), byte for byte, so the two trade together.
+(`pk_coop_evolve_trade`, EVO_MODE_TRADE) and a second save. The Android app does the same (`CoopTrade.kt`'s `CoopTradeFlow`, run by the battle glue; QUICK MENU > TRADE, `MgbaCore.pkCoopTradeMon` / `pkCoopEvolveTrade`), byte for byte, so the two trade together. A save that fails after a commit is never left like that (the game closed then
+would hold the other's Pokémon in the partner's save and its own back: a copy): DONE / ACK wait, the save is tried again every
+5 s on the field with a notice asking the player to save, and the game's own save counter (gameStats[GAME_STAT_SAVED_GAME] ^
+encryptionKey) moving after our last try means the player saved from the START menu.
 
 ### The link bridge (a joined battle as a link battle)
 

@@ -409,6 +409,18 @@ class MgbaTradeGame(private val env: CoopGlueEnv) : CoopTradeGame {
     override fun evolveTrade(slot: Int) = MgbaCore.pkCoopEvolveTrade(slot)
     override fun saveGame() = MgbaCore.pkCoopSaveGame()
     override fun beforeSave() = env.beforeSave()
+    // gSaveBlock1Ptr->gameStats[GAME_STAT_SAVED_GAME] ^ gSaveBlock2Ptr->encryptionKey (English and French Emerald alike).
+    override fun saveCount(): Long? {
+        fun u32(addr: Long): Long? = MgbaCore.pkReadBytes(addr, 4)?.takeIf { it.size == 4 }?.let { b ->
+            (b[0].toLong() and 0xFF) or ((b[1].toLong() and 0xFF) shl 8) or ((b[2].toLong() and 0xFF) shl 16) or ((b[3].toLong() and 0xFF) shl 24)
+        }
+        val sb1 = u32(0x03005D8CL) ?: return null
+        val sb2 = u32(0x03005D90L) ?: return null
+        if (sb1 shr 24 != 2L || sb2 shr 24 != 2L) return null
+        val stat = u32(sb1 + 0x159C) ?: return null
+        val key = u32(sb2 + 0xAC) ?: return null
+        return stat xor key
+    }
 }
 
 /** The retail Emerald's RAM addresses the app side reads (the co-op bridge's own are in pk_coop_emerald.h). */

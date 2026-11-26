@@ -41,7 +41,21 @@ static struct {
   uint32_t afterSaveId;
   int evolveSlot;
   int skip; /* ticks whose keys are the QUICK MENU's, not the window's */
+  /* a commit not saved yet: the save is tried again every few seconds, and the player's own save (START > SAVE) counts */
+  bool unsaved;
+  uint32_t unsavedStat, retryAt, warnAt;
 } tr;
+
+#define TR_RETRY_MS 5000u
+
+/* The game's own save counter (gameStats[GAME_STAT_SAVED_GAME] ^ encryptionKey): every save, ours or the START menu's, adds one. */
+static uint32_t tr_save_count(void) {
+  uint32_t sb1 = 0, sb2 = 0, stat = 0, key = 0;
+  if (!pd_lr_read_memory(core, 0x03005D8Cu, &sb1, 4) || !pd_lr_read_memory(core, 0x03005D90u, &sb2, 4) || (sb1 >> 24) != 2 ||
+      (sb2 >> 24) != 2 || !pd_lr_read_memory(core, sb1 + 0x159C, &stat, 4) || !pd_lr_read_memory(core, sb2 + 0xAC, &key, 4))
+    return 0;
+  return stat ^ key;
+}
 
 static bool tr_busy(void) { return tr.phase != TRP_IDLE; }
 static bool tr_hold(void) { return tr.phase != TRP_IDLE; }
@@ -122,6 +136,8 @@ static bool tr_commit(int slot, const uint8_t *mine, const uint8_t *theirs, int 
   tr.afterSave = afterSave;
   tr.afterSaveId = id;
   tr.evolveSlot = slot;
+  tr.unsaved = true;
+  tr.unsavedStat = tr_save_count();
   int list[3] = {CBO_TRADE_SAVE, CBO_EVOLVE_TRADE, CBO_SAVE};
   cb_ops_load(list, 3);
   cb.phase = CBP_AFTER;
@@ -131,8 +147,19 @@ static bool tr_commit(int slot, const uint8_t *mine, const uint8_t *theirs, int 
 
 /* The ops' save of a commit went through (or not: the message waits for a save that does). */
 static void tr_saved(bool ok) {
-  if (!ok || !tr.afterSave)
+  if (!tr.afterSave)
     return;
+  if (!ok) {
+    /* never left like this: a game that quits now would have the other's Pokemon AND its own back. Tried again, and the
+     * player is asked to save */
+    cb_log("trade: the save after the trade failed: tried again every few seconds");
+    cb_notice("THE TRADE ISN'T SAVED. SAVE THE GAME (START > SAVE).");
+    tr.retryAt = cbNow + TR_RETRY_MS;
+    tr.warnAt = cbNow + TR_RETRY_MS;
+    tr.unsavedStat = tr_save_count();
+    return;
+  }
+  tr.unsaved = false;
   if (tr.afterSave == TR_DONE) {
     tr.doneOwed = true;
     tr.doneId = tr.afterSaveId;
@@ -284,6 +311,28 @@ static void tr_tick(void) {
   if (tr.doneOwed && cb_connected && (!tr.doneSent || cbNow - tr.doneSent >= TR_RESEND_MS)) {
     tr.doneSent = cbNow ? cbNow : 1;
     tr_send(TR_DONE, tr.doneId, NULL, 0);
+  }
+  if (tr.unsaved && tr.afterSave && cb.opAt >= cb.opCount) {
+    /* the save after a trade failed: the player's own save (the counter moved) or ours, tried again, completes it */
+    const struct coop_api *api = cb_api();
+    uint32_t n = tr_save_count();
+    if (n && n != tr.unsavedStat) {
+      cb_log("trade: saved by the player");
+      tr_saved(true);
+    } else if (api && (int32_t)(cbNow - tr.retryAt) >= 0 && cb.phase == CBP_IDLE && !lb.pumping && api->free_field(core)) {
+      api->set_call(cb_call);
+      api->set_cap(cb_cap);
+      int r = cb_save_game(api);
+      tr.unsavedStat = tr_save_count();
+      if (r == 1)
+        tr_saved(true);
+      else
+        tr.retryAt = cbNow + TR_RETRY_MS;
+    }
+    if (tr.unsaved && (int32_t)(cbNow - tr.warnAt) >= 0) {
+      tr.warnAt = cbNow + 4000u;
+      cb_notice("THE TRADE ISN'T SAVED. SAVE THE GAME (START > SAVE).");
+    }
   }
   if (!tr.phase)
     return;

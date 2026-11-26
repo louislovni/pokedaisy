@@ -37,6 +37,8 @@ interface CoopTradeGame {
     fun saveGame(): Int
     /** The save file backed up before the game writes it (CoopGlueEnv.beforeSave). */
     fun beforeSave(): Boolean
+    /** The game's own save counter (every save, the START menu's too, adds one); null = unreadable. */
+    fun saveCount(): Long? = null
 }
 
 class CoopTradeFlow(
@@ -79,11 +81,17 @@ class CoopTradeFlow(
     private var afterSaveId = 0
     private var evolveSlot = 0
     private var opsSince = 0L
+    // A commit whose save failed: tried again every few seconds, and the player's own save counts. Never left as it is:
+    // a game closed then would have the other's Pokémon in the partner's save AND its own back.
+    private var unsaved = false
+    private var unsavedCount: Long? = null
+    private var retryAt = 0L
+    private var warnAt = 0L
 
     /** The game is held: a trade window is up. */
     val hold: Boolean get() = phase != Phase.IDLE
     /** A trade is under way (LOAD STATE refused). */
-    val busy: Boolean get() = phase != Phase.IDLE || ops.isNotEmpty() || pending != null
+    val busy: Boolean get() = phase != Phase.IDLE || ops.isNotEmpty() || pending != null || unsaved
 
     /** Why TRADE can't start now (null = it can); [battleBusy]: a joined battle is under way. */
     fun why(battleBusy: Boolean): String? = when {
@@ -213,12 +221,14 @@ class CoopTradeFlow(
         ops.clear()
         ops.addAll(listOf(Op.SAVE_MSG, Op.EVOLVE, Op.SAVE))
         opsSince = clock()
+        unsaved = true
+        unsavedCount = game.saveCount()
         return true
     }
 
     private fun opsStep(now: Long) {
         val op = ops.firstOrNull() ?: return
-        if (now - opsSince > OPS_PATIENCE_MS) { ops.clear(); notice(tr("SOME CHANGES COULD NOT BE APPLIED.")); return }
+        if (now - opsSince > OPS_PATIENCE_MS) { ops.clear(); notice(tr("SOME CHANGES COULD NOT BE APPLIED.")); retryAt = now; return }
         if (!game.onFreeField()) return
         val r = when (op) {
             Op.EVOLVE -> game.evolveTrade(evolveSlot)
@@ -226,12 +236,42 @@ class CoopTradeFlow(
         }
         if (r == -1) return
         if (op != Op.EVOLVE && r != 1) notice(tr("THE GAME COULD NOT BE SAVED."))
-        if (op == Op.SAVE_MSG && r == 1) {
-            if (afterSave == DONE) { doneOwed = true; doneId = afterSaveId; doneSent = 0L } else send(ACK, afterSaveId)
-            notice(tr("TRADE COMPLETE."))
+        if (op != Op.EVOLVE && unsaved) {
+            // Our own save moves the counter too, failed or not: only a save of ours that worked, or one of the player's
+            // after it, completes the trade.
+            if (r == 1) saved() else {
+                log("trade: the save after the trade failed: tried again every few seconds")
+                retryAt = now + RETRY_MS
+                warnAt = now + RETRY_MS
+                unsavedCount = game.saveCount()
+            }
         }
         ops.removeFirst()
         opsSince = now
+    }
+
+    private fun saved() {
+        if (!unsaved) return
+        unsaved = false
+        if (afterSave == DONE) { doneOwed = true; doneId = afterSaveId; doneSent = 0L } else send(ACK, afterSaveId)
+        notice(tr("TRADE COMPLETE."))
+    }
+
+    /** A commit not saved yet: the player's own save (the counter moved) or ours, tried again, completes it. */
+    private fun unsavedStep(now: Long) {
+        if (!unsaved || ops.isNotEmpty()) return
+        val n = game.saveCount()
+        if (n != null && unsavedCount != null && n != unsavedCount) { log("trade: saved by the player"); saved(); return }
+        if (now >= retryAt && game.onFreeField()) {
+            val r = if (!game.beforeSave()) 0 else game.saveGame()
+            unsavedCount = game.saveCount()
+            if (r == 1) { saved(); return }
+            retryAt = now + RETRY_MS
+        }
+        if (now >= warnAt) {
+            warnAt = now + 4_000L
+            notice(tr("THE TRADE ISN'T SAVED. SAVE THE GAME (START > SAVE)."))
+        }
     }
 
     // --- every frame ---
@@ -243,6 +283,7 @@ class CoopTradeFlow(
             send(DONE, doneId)
         }
         opsStep(now)
+        unsavedStep(now)
         when (phase) {
             Phase.OFFERED, Phase.CONFIRM -> if (now - phaseAt >= ANSWER_MS) {
                 send(if (phase == Phase.OFFERED) REPLY else CONFIRM, id, byteArrayOf(0))
@@ -365,6 +406,7 @@ class CoopTradeFlow(
         private const val DONE_MS = 30_000L
         private const val RESEND_MS = 2_000L
         private const val OPS_PATIENCE_MS = 60_000L
+        private const val RETRY_MS = 5_000L
 
         private fun put32(b: ByteArray, at: Int, v: Int) {
             for (i in 0 until 4) b[at + i] = (v ushr (8 * i)).toByte()

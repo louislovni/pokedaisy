@@ -510,6 +510,20 @@ static void cb_ops_load(const int *ops, int n) {
 enum { CBO_GIVE, CBO_SAVE, CBO_WHITEOUT, CBO_TRADE_SAVE, CBO_EVOLVE_TRADE };
 static void tr_saved(bool ok);
 static int tr_evolve_slot(void);
+static bool tr_unsaved(void);
+#ifdef PD_COOP_TEST
+static int cbFailSaves; /* the two-game test: the next saves fail */
+#endif
+/* The game's save (pk_coop_save_game's codes). */
+static int cb_save_game(const struct coop_api *api) {
+#ifdef PD_COOP_TEST
+  if (cbFailSaves > 0) {
+    cbFailSaves--;
+    return 0;
+  }
+#endif
+  return api->save_game(core);
+}
 
 static void cb_reset(void) {
   cb.phase = CBP_IDLE;
@@ -746,11 +760,11 @@ static void cb_ops_step(void) {
   } else if (op == CBO_EVOLVE_TRADE) {
     r = api->evolve_trade(core, tr_evolve_slot());
   } else {
-    r = api->save_game(core);
+    r = cb_save_game(api);
     if (r == 0 || r == -2)
       cb_notice("THE GAME COULD NOT BE SAVED.");
-    if (op == CBO_TRADE_SAVE && r != -1)
-      tr_saved(r == 1);
+    if ((op == CBO_TRADE_SAVE || tr_unsaved()) && r != -1)
+      tr_saved(r == 1); /* any save of ours after a trade: it moves the save counter, worked or not */
     if (r == 1 && cb.unsaved) {
       /* the partner's catch is in this game and saved: acknowledged, remembered as given */
       cb_send_id(CB_RESULT_ACK, cb.unsavedId, NULL, 0);
@@ -1253,6 +1267,7 @@ static void cb_story_message(const struct cb_msg *m, int state) {
 static void cb_name_text(const uint8_t *n, char *out, size_t cap);
 #include "pd_coop_trade.inc"
 static int tr_evolve_slot(void) { return tr.evolveSlot; }
+static bool tr_unsaved(void) { return tr.unsaved; }
 
 /* ---- messages and the link ---- */
 static void cb_cancelled(int reason) {
@@ -1656,6 +1671,7 @@ RETRO_API void retro_pd_test_write(uint32_t a, const uint8_t *in, int n) {
     core->busWrite8(core, a + (uint32_t)i, in[i]);
 }
 RETRO_API void retro_pd_test_trade(void) { tr_start(); }
+RETRO_API void retro_pd_test_fail_saves(int n) { cbFailSaves = n; }
 RETRO_API int retro_pd_test_trade_phase(void) { return tr.phase | (tr.pending ? 0x100 : 0) | (tr.doneOwed ? 0x200 : 0); }
 RETRO_API int retro_pd_test_phase(void) {
   const struct coop_api *api = cb_api();
