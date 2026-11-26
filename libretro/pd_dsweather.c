@@ -372,6 +372,33 @@ static int nParts, shownKind = -100;
 static unsigned frame;
 static float layerX, layerY;
 
+/* The camera moved by (dx, dy): every particle keeps its place in the world, and one that goes off a side comes back in
+ * at the other (the same air, a step further on). */
+static void follow(const struct dsw_target *t, float top) {
+  float w, h;
+  w = (float)t->w / t->scale;
+  h = (float)t->h / t->scale;
+  if (t->dx == 0 && t->dy == 0)
+    return;
+  for (int i = 0; i < nParts; i++) {
+    struct part *p = &parts[i];
+    p->x -= t->dx;
+    p->y -= t->dy;
+    if (p->x < -24)
+      p->x += w + 48;
+    else if (p->x > w + 24)
+      p->x -= w + 48;
+    if (p->y > h + 24 && t->dy < 0)
+      p->y -= h + 48;
+    else if (p->y < top && t->dy > 0)
+      p->y += h - top;
+    if (shownKind == DSW_RAIN || shownKind == DSW_STORM) // rain: its landing line moves with the ground
+      p->life -= (int)t->dy;
+  }
+  layerX += t->dx;
+  layerY += t->dy;
+}
+
 void dsw_reset(void) {
   nParts = 0;
   shownKind = -100;
@@ -447,6 +474,7 @@ static void snow_spawn(struct part *p, float w, float h, bool anywhere) {
   p->phase = rnd() * 6.28f;
   p->x = rnd() * w;
   p->y = anywhere ? rnd() * h : -8 - rnd() * 20;
+  p->life = p->look = 0;
 }
 static void snowing(const struct dsw_target *t, const struct set *s, float wind, int alpha) {
   float w, h;
@@ -473,6 +501,7 @@ static void sand_spawn(struct part *p, float w, float h, bool anywhere) {
   p->phase = rnd() * 6.28f;
   p->x = anywhere ? rnd() * w : -16 - rnd() * 40;
   p->y = rnd() * h;
+  p->life = p->look = 0;
 }
 static void layer(const struct dsw_target *t, const struct img *im, float ox, float oy, int alpha) {
   if (!im->px)
@@ -501,18 +530,22 @@ void dsw_weather(int kind, const struct dsw_target *t) {
   switch (kind) {
   case DSW_RAIN:
     start(kind, 34 * density / 100, t, rain_spawn);
+    follow(t, -100);
     falling(t, &sRain, rain_spawn);
     break;
   case DSW_STORM:
     start(kind, 16 * density / 100, t, storm_spawn);
+    follow(t, -100);
     falling(t, &sStorm, storm_spawn);
     break;
   case DSW_SNOW:
     start(kind, 44 * density / 100, t, snow_spawn);
+    follow(t, -100);
     snowing(t, &sSnow, 0, 256);
     break;
   case DSW_SAND: {
     start(kind, 56 * density / 100, t, sand_spawn);
+    follow(t, -100);
     layerX -= 5.0f;
     layerY -= 1.0f;
     for (int y = 0; y < t->h; y++) // the air thick with sand
@@ -625,6 +658,11 @@ void dsw_season(int season, const struct dsw_target *t) {
     for (int i = 0; i < nParts; i++)
       season_spawn(&parts[i], w, h, true);
   }
+  follow(t, -12); // seasons' look (p->look) isn't a splash: follow() leaves it be, life is 0
+  for (int i = 0; i < 8; i++) {
+    sparkles[i].x -= t->dx;
+    sparkles[i].y -= t->dy;
+  }
   // Spring: petals in two pinks; autumn: leaves orange, red or gold, a darker side and a stem.
   static const uint32_t PETALS[2][4] = {{0xF890C0, 0xD86090, 0, 0}, {0xFFC8E0, 0xF080B0, 0, 0}};
   static const uint32_t LEAVES[3][4] = {
@@ -642,8 +680,10 @@ void dsw_season(int season, const struct dsw_target *t) {
       p->x += p->vx + sway * (season == SEASON_AUTUMN ? 0.6f : 0.4f);
       p->y += p->vy + cosf(p->phase * 1.3f) * 0.15f;
     }
-    if (p->y > h + 6 || p->x > w + 8)
+    if (p->y > h + 6)
       season_spawn(p, w, h, false);
+    else if (p->x > w + 10)
+      p->x -= w + 20; // blown off one side, in at the other
     int step = (int)((p->phase + 6.28f) * 1.3f);
     if (season == SEASON_SPRING)
       doodle(t, &PETAL[(step + p->look) % 3], PETALS[p->kind & 1], p->x, p->y, sway < 0, 256);

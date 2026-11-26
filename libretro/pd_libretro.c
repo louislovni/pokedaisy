@@ -2921,6 +2921,23 @@ static bool amb_hides(void) {
   return game.cfg && (game.kind == PD_GAME_EMERALD || game.kind == PD_GAME_FIRERED) &&
          (game.cfg->battleMons == 0x02024084u || game.cfg->battleMons == 0x02023BE4u);
 }
+/* The map's scroll (BG2), and how far it moved since the last frame drawn: the particles keep their place in the world.
+ * A jump (a warp, a new map) counts as no move. */
+static int ambCamH = -1, ambCamV = -1;
+static float ambCamDx, ambCamDy;
+static void amb_camera(void) {
+  int h, v;
+  pk_wide_bg2_scroll(core, &h, &v);
+  if (ambCamH >= 0) {
+    int dh = ((h - ambCamH + 256) & 511) - 256, dv = ((v - ambCamV + 256) & 511) - 256;
+    if (dh >= -16 && dh <= 16 && dv >= -16 && dv <= 16) {
+      ambCamDx += (float)dh;
+      ambCamDy += (float)dv;
+    }
+  }
+  ambCamH = h;
+  ambCamV = v;
+}
 /* After each frame: what the next one draws, and the game's sprites it hides. */
 static void amb_after_run(void) {
   const bool field = amb_field();
@@ -2965,6 +2982,10 @@ static void amb_after_run(void) {
   pk_season_set(colours ? ambSeasonShown : -1, ambSeasonK);
   const int w = snap.weather;
   const bool fine = w == 0 || w == 1 || w == 2;
+  if (field)
+    amb_camera();
+  else
+    ambCamH = ambCamV = -1, ambCamDx = ambCamDy = 0;
   ambSeasonDrawn = field && fine && ambKind < 0 && ambSeasonShown >= 0 && ambSeasonShown != SEASON_SUMMER ? ambSeasonShown : -1;
   if (!haveGame) {
     dsw_reset();
@@ -2999,7 +3020,9 @@ static void amb_plot(int x, int y, uint32_t rgb, int a) {
 static void amb_draw(void) {
   if (ambKind < 0 && ambSeasonDrawn < 0)
     return;
-  struct dsw_target t = {amb_plot, CW, CH, wideReady ? game_scale(wideW, wideH) : game_scale(gameW, gameH)};
+  struct dsw_target t = {amb_plot, CW, CH, wideReady ? game_scale(wideW, wideH) : game_scale(gameW, gameH), ambCamDx,
+                         ambCamDy};
+  ambCamDx = ambCamDy = 0;
   if (ambKind >= 0)
     dsw_weather(ambKind, &t);
   else

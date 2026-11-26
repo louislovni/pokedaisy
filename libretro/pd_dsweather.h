@@ -23,6 +23,9 @@ enum { SEASON_NONE = -1, SEASON_SPRING, SEASON_SUMMER, SEASON_AUTUMN, SEASON_WIN
 struct dsw_target {
   void (*plot)(int x, int y, uint32_t rgb, int a);
   int w, h, scale;
+  /* How far the map scrolled since the last frame drawn, in its pixels: the particles move the other way, so they keep
+   * their place in the world while the player walks. */
+  float dx, dy;
 };
 
 /* One frame of [kind]'s weather (needs the cart). Particles keep going from frame to frame; another kind starts afresh. */
