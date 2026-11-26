@@ -664,7 +664,7 @@ const struct pd_tr_entry pd_tr_fr[2502] = {
     { "FOLD LAYOUT", "MODE PLIÉ" },
     { "FOLDER", "DOSSIER" },
     { "FOLDERS", "DOSSIERS" },
-    { "FOLLOWER", "COMPAGNON" },
+    { "FOLLOWER", "POKÉMON QUI SUIT" },
     { "FONT", "POLICE" },
     { "FOREST", "FORÊT" },
     { "FORGET", "OUBLIER" },
