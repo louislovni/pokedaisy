@@ -11,7 +11,7 @@ uint16_t u16(const Bytes& b,size_t p){return b.at(p)|(uint16_t(b.at(p+1))<<8);}
 uint32_t u32(const Bytes& b,size_t p){return u16(b,p)|(uint32_t(u16(b,p+2))<<16);}
 Bytes slice(const Bytes& b,size_t p,size_t n){if(p>b.size() || n>b.size()-p)throw std::runtime_error("short art");return {b.begin()+p,b.begin()+p+n};}
 size_t block(const Bytes& b,const std::string& tag){auto i=std::search(b.begin(),b.end(),tag.begin(),tag.end());if(i==b.end())throw std::runtime_error("missing block");return i-b.begin();}
-Bytes file(const Bytes& rom,std::string path){
+Bytes file(const Bytes& rom,std::string path,size_t maxSize=32*1024*1024){
  auto fnt=slice(rom,u32(rom,0x40),u32(rom,0x44));unsigned id=0xf000;
  size_t begin=1;
  while(begin<path.size()){
@@ -25,7 +25,7 @@ Bytes file(const Bytes& rom,std::string path){
   begin=end+1;
  }
  size_t fat=u32(rom,0x48)+id*8,start=u32(rom,fat),end=u32(rom,fat+4);
- if(end<start || end-start>32*1024*1024)throw std::runtime_error("bad FAT");
+ if(end<start || end-start>maxSize)throw std::runtime_error("bad FAT");
  return slice(rom,start,end-start);
 }
 Bytes member(const Bytes& narc,unsigned id){
@@ -297,7 +297,161 @@ std::vector<std::string> dex_text(const Bytes& bank,bool unova,int speciesCount)
 }
 }
 
+namespace {
+// Origin HeartGold (OriginHeartGold.kt): cart offsets of the ARM9 tables (the build is pinned by ds_origin_cart).
+constexpr size_t originTm01=0x4000+0xFFFF8, originTm93=0x4000+0xFFFAC, originIconPalettes=0x4000+0xFF7FC;
+constexpr size_t originMapHeaders=0x4000+0xF37C4, originForms=0x4000+0xFEDC0;
+constexpr int originFormCount=0x19F;
+constexpr size_t originPicture=80*40+32;
+constexpr int originMapHeaderCount=540, originEggIcon=0xB49;
+bool origin_active(DsGame game){return game==DsGame::Johto && ds_origin();}
+// The machines in the DEX's order (OriginHeartGold.dexMachines): TM01 .. TM92, TM93 .. TM130, HM01 .. HM08.
+std::vector<int> origin_dex_machines(const std::vector<int>& m){
+  if(m.size()<138)return {};
+  std::vector<int> out(m.begin(),m.begin()+92);
+  out.insert(out.end(),m.begin()+100,m.begin()+138);
+  out.insert(out.end(),m.begin()+92,m.begin()+100);
+  return out;
+}
+DsDexArt origin_dex_art(const Bytes& rom){
+  // NdsArt.kt's dexOrigin: HeartGold's archives grown to the National Dex's 1025, the text banks renumbered.
+  DsDexArt art;
+  constexpr int count=dsOriginLastNational;
+  try{
+    const auto personal=file(rom,"/a/0/0/2");
+    Bytes heights,weights,tutor;
+    try{const auto zukan=file(rom,"/a/0/7/4");heights=member(zukan,0);weights=member(zukan,1);}catch(const std::exception&){}
+    try{tutor=file(rom,"/data/tutor_moves.narc");}catch(const std::exception&){}
+    try{art.learnsets=file(rom,"/a/0/3/3");}catch(const std::exception&){}
+    const auto machines=origin_dex_machines(ds_origin()->machines);
+    std::vector<DsDexDetails> details(count+1);
+    for(int species=1;species<=count;++species){
+      const auto record=member(personal,species);
+      if(record.size()<0x1C)continue;
+      auto& entry=details[species];
+      std::copy_n(record.begin(),6,entry.stats.begin());
+      if(record[0x13]<6)entry.growth=record[0x13];
+      if(size_t(species*4+4)<=std::min(heights.size(),weights.size())){
+        entry.heightDm=u32(heights,species*4);entry.weightHg=u32(weights,species*4);
+      }
+      // Its own rule (the party menu's check): the move in the species' tutor list or its level-up moves, RETURN
+      // anyone, MEW every one.
+      std::vector<int> teachable;
+      try{
+        const auto t=member(tutor,species);
+        for(size_t i=0;i+2<=t.size();i+=2)if(u16(t,i)!=0xffff)teachable.push_back(u16(t,i));
+      }catch(const std::exception&){}
+      try{
+        const auto l=member(art.learnsets,species);
+        for(size_t i=0;i+4<=l.size() && u16(l,i)!=0xffff;i+=4)teachable.push_back(u16(l,i+2));
+      }catch(const std::exception&){}
+      for(size_t i=0;i<machines.size();++i){
+        const int move=machines[i];
+        if(move && (species==151 || move==216 || std::find(teachable.begin(),teachable.end(),move)!=teachable.end()))
+          entry.machineBits[i/8]|=uint8_t(1u<<(i%8));
+      }
+      entry.hasMachines=!machines.empty();
+    }
+    art.details=std::move(details);
+  }catch(const std::exception&){art.details.clear();}
+  if(!art.details.empty()){
+    try{
+      const auto messages=file(rom,"/a/0/2/7");
+      auto descriptions=dex_text(member(messages,791),false,count);
+      auto categories=dex_text(member(messages,803),false,count);
+      for(size_t i=1;i<art.details.size();++i){
+        if(i<descriptions.size())art.details[i].description=std::move(descriptions[i]);
+        if(i<categories.size())art.details[i].category=std::move(categories[i]);
+      }
+    }catch(const std::exception&){}
+  }
+  // Its fronts (/data/pokepic_m.narc, eight members a species: the front, 160 x 80 linear, then its palette; 40 MB in
+  // all) kept as each species' first frame and 16 colours: originPicture bytes a species.
+  try{
+    const auto pics=file(rom,"/data/pokepic_m.narc",96*1024*1024);
+    art.pictures.assign(size_t(count+1)*originPicture,0);
+    for(int species=1;species<=count;++species){
+      try{
+        const auto chars=tiles(member(pics,species*8));
+        const auto pal=member(pics,species*8+1);
+        const size_t colors=block(pal,"TTLP")+24;
+        if(chars.size()<6400 || pal.size()<colors+32)continue;
+        auto* to=art.pictures.data()+size_t(species)*originPicture;
+        for(int y=0;y<80;++y)std::copy_n(chars.begin()+y*80,40,to+y*40);
+        std::copy_n(pal.begin()+colors,32,to+3200);
+      }catch(const std::exception&){}
+    }
+  }catch(const std::exception&){art.pictures.clear();}
+  try{
+    const auto evo=file(rom,"/a/0/3/4");
+    for(int species=1;species<=count;++species){
+      const auto record=member(evo,species);
+      for(size_t i=0;i+6<=record.size() && i<60;i+=6){
+        const int method=u16(record,i),param=u16(record,i+2),to=u16(record,i+4);
+        if(method && to>0 && to<=count && to!=species)art.evolutions.push_back({species,to,method,param});
+      }
+    }
+  }catch(const std::exception&){}
+  return art;
+}
+}
+
+bool ds_origin_read(const std::vector<uint8_t>& rom,DsOrigin& out){
+  // NdsArt.kt's readOrigin and readNames (NAMES_ORIGIN: a/0/2/7's banks 232 species, 739 moves, 219 items).
+  out={};
+  try{
+    const auto messages=file(rom,"/a/0/2/7");
+    out.species=dex_text(member(messages,232),false,8000);
+    out.moves=dex_text(member(messages,739),false,8000);
+    out.items=dex_text(member(messages,219),false,8000);
+    const auto personal=file(rom,"/a/0/0/2");
+    out.speciesTypes.assign(dsOriginLastSpecies+1,{-1,-1});
+    for(int id=1;id<=dsOriginLastSpecies;++id){
+      try{
+        const auto p=member(personal,id);
+        if(p.size()>=8)out.speciesTypes[id]={int8_t(p[6]),int8_t(p[7])};
+      }catch(const std::exception&){}
+    }
+    // /extra/new_move_data.narc: type at 0, power at 3, PP at 5.
+    const auto moves=file(rom,"/extra/new_move_data.narc");
+    const unsigned count=u16(moves,u16(moves,12)+8);
+    out.moveMeta.assign(count,{-1,0});out.basePp.assign(count,0);
+    for(unsigned id=1;id<count;++id){
+      const auto m=member(moves,id);
+      if(m.size()<6)continue;
+      out.moveMeta[id]={int16_t(m[0]),int16_t(m[3])};out.basePp[id]=m[5];
+    }
+    if(count<=33 || out.basePp[1]!=35 || out.basePp[33]!=35)out.basePp.clear();
+    // Its ARM9's form table: { u16 species, u16 form species id, u8 form, pad }.
+    const auto forms=slice(rom,originForms,originFormCount*6);
+    for(int i=0;i<originFormCount;++i){
+      const int species=u16(forms,i*6),target=u16(forms,i*6+2);
+      if(species&&target)out.forms.push_back({uint16_t(species),uint16_t(forms[i*6+4]),uint16_t(target)});
+    }
+    const auto tm01=slice(rom,originTm01,200),tm93=slice(rom,originTm93,76);
+    for(int i=0;i<138;++i)out.machines.push_back(i<100?u16(tm01,i*2):u16(tm93,(i-100)*2));
+    // Each map header's encounter bank (0xFF none) into a/0/3/7: its walking and surfing rates.
+    try{
+      const auto headers=slice(rom,originMapHeaders,originMapHeaderCount*24);
+      const auto encounters=file(rom,"/a/0/3/7");
+      for(int map=0;map<originMapHeaderCount;++map){
+        const int bank=headers[map*24];
+        if(bank==0xff)continue;
+        try{
+          const auto e=member(encounters,bank);
+          if(e.size()>=2){out.wildRates.push_back(map);out.wildRates.push_back(e[0]);out.wildRates.push_back(e[1]);}
+        }catch(const std::exception&){}
+      }
+    }catch(const std::exception&){}
+  }catch(const std::exception& e){
+    std::fprintf(stderr,"Origin HeartGold tables: %s\n",e.what());
+    return false;
+  }
+  return out.species.size()>dsOriginLastNational && out.moves.size()>1;
+}
+
 DsDexArt ds_dex_art(const std::vector<uint8_t>& rom,DsGame game){
+  if(origin_active(game))return origin_dex_art(rom);
   DsDexArt art;
   if(game==DsGame::Unsupported)return art;
   const bool unova=ds_unova(game),johto=game==DsGame::Johto;
@@ -321,8 +475,8 @@ DsDexArt ds_dex_art(const std::vector<uint8_t>& rom,DsGame game){
       const size_t growthOffset=unova?0x15:0x13;
       if(record.size()>growthOffset && record[growthOffset]<6)entry.growth=record[growthOffset];
       const size_t machineOffset=unova?0x28:0x1c;
-      if(record.size()>=machineOffset+entry.machineBits.size()){
-        std::copy_n(record.begin()+machineOffset,entry.machineBits.size(),entry.machineBits.begin());
+      if(record.size()>=machineOffset+13){
+        std::copy_n(record.begin()+machineOffset,13,entry.machineBits.begin());
         entry.hasMachines=true;
       }
       if(unova && record.size()>=0x28){
@@ -388,6 +542,17 @@ std::vector<DsDexEvolution> ds_dex_evolutions(const DsDexArt& art,int species){
 std::vector<DsDexMove> ds_level_moves(const DsDexArt& art,DsGame game,int species){
   std::vector<DsDexMove> moves;
   const bool unova=ds_unova(game);
+  if(origin_active(game)){
+    if(species<=0 || species>dsOriginLastNational)return moves;
+    try{
+      const auto record=member(art.learnsets,species);
+      for(size_t i=0;i+4<=record.size() && u16(record,i)!=0xffff;i+=4){
+        const int level=u16(record,i),move=u16(record,i+2);
+        if(move && level<=100)moves.push_back({level,move});
+      }
+    }catch(const std::exception&){}
+    return moves;
+  }
   if(species<=0 || species>(unova?649:493))return moves;
   try{
     const auto record=member(art.learnsets,species);
@@ -405,6 +570,36 @@ std::vector<DsDexMove> ds_level_moves(const DsDexArt& art,DsGame game,int specie
 DsDexPage ds_dex_page(const DsDexArt& art,DsGame game,int species){
   DsDexPage page;
   const bool unova=ds_unova(game);
+  if(origin_active(game)){
+    if(species<=0 || species>dsOriginLastNational)return page;
+    if(size_t(species)<art.details.size() && art.details[species].hasMachines){
+      const auto& bits=art.details[species].machineBits;
+      const auto moves=origin_dex_machines(ds_origin()->machines);
+      for(int i=0;i<int(moves.size());++i){
+        if(!(bits[i/8]&(1u<<(i%8))))continue;
+        const bool hm=i>=130;
+        page.machines.push_back({hm,hm?i-129:i+1,moves[i]});
+      }
+    }
+    page.moves=ds_level_moves(art,game,species);
+    // Its front as origin_dex_art kept it: 80 rows of 40 bytes (4 bits a pixel), then 16 BGR555 colours.
+    try{
+      if(art.pictures.size()<size_t(species+1)*originPicture)return page;
+      const auto* p=art.pictures.data()+size_t(species)*originPicture;
+      if(std::all_of(p,p+3200,[](uint8_t b){return b==0;}))return page;
+      uint32_t pal[16];
+      for(int i=0;i<16;++i){
+        const unsigned v=p[3200+2*i]|(p[3201+2*i]<<8);
+        pal[i]=0xff000000u|((v&31)*255/31)<<16|(((v>>5)&31)*255/31)<<8|(((v>>10)&31)*255/31);
+      }
+      page.side=80;page.sprite.assign(80*80,0);
+      for(int y=0;y<80;++y)for(int x=0;x<80;++x){
+        const int color=(p[y*40+x/2]>>(x%2*4))&15;
+        if(color)page.sprite[y*80+x]=pal[color];
+      }
+    }catch(const std::exception&){page.sprite.clear();page.side=0;}
+    return page;
+  }
   if(species<=0 || species>(unova?649:493))return page;
   if(size_t(species)<art.details.size() && art.details[species].hasMachines){
     const auto& bits=art.details[species].machineBits;
@@ -462,6 +657,31 @@ DsDexPage ds_dex_page(const DsDexArt& art,DsGame game,int species){
 
 std::vector<std::vector<uint32_t>> ds_party_icons(const std::vector<uint8_t>& rom,DsGame game){
   using namespace pd_ds_data;
+  if(origin_active(game)){
+    // NdsArt.kt's extractOrigin: /data/pokeicon.narc, 7 + 2 x species / form id each icon (the egg's 0xB49), in the
+    // palette its ARM9's table gives.
+    try{
+      const auto narc=file(rom,"/data/pokeicon.narc");
+      const auto pal=palette(member(narc,0));
+      const auto banks=slice(rom,originIconPalettes,dsOriginLastSpecies+1);
+      const int egg=ds_egg_icon(game);
+      std::vector<std::vector<uint32_t>> icons(egg+1);
+      for(int id=1;id<=egg;++id){
+        try{
+          const auto graphic=member(narc,id==egg?originEggIcon:7+2*id);
+          const auto tile=slice(graphic,block(graphic,"RAHC")+32,512);
+          const unsigned bank=id==egg?0:banks[id];
+          if((bank+1)*16>pal.size())continue;
+          auto& icon=icons[id];icon.resize(32*32,0);
+          for(int y=0;y<32;y++)for(int x=0;x<32;x++){
+            const int v=pixel(tile,(y/8)*4+x/8,x%8,y%8);
+            if(v)icon[y*32+x]=pal.at(bank*16+v);
+          }
+        }catch(const std::exception&){}
+      }
+      return icons;
+    }catch(const std::exception& e){std::fprintf(stderr,"DS party art: %s\n",e.what());return {};}
+  }
   try{
     const bool unova=ds_unova(game),sequel=ds_unova_sequel(game);
     const bool johto=game==DsGame::Johto;
@@ -497,14 +717,16 @@ std::vector<std::vector<uint32_t>> ds_hud_item_icons(const std::vector<uint8_t>&
   const auto range=[](const auto& a){return std::pair{std::begin(a),std::end(a)};};
   const auto [first,last]=ds_unova_sequel(game)?range(sequelHudItemArt):ds_unova(game)?range(unovaHudItemArt):
     game==DsGame::Johto?range(johtoHudItemArt):range(platinumHudItemArt);
+  const bool hack=origin_active(game);
   try {
     const auto narc=file(rom,ds_unova(game)?"/a/0/2/5":game==DsGame::Johto?"/a/0/1/8":"/itemtool/itemdata/item_icon.narc");
     const auto maxId=std::max_element(first,last,[](const auto& a,const auto& b){return a[0]<b[0];});
     std::vector<std::vector<uint32_t>> icons((*maxId)[0]+1);
     for(auto i=first;i!=last;++i){
       try {
-        const auto pal=palette(member(narc,(*i)[1]&0xffff));
-        const auto graphic=member(narc,(*i)[1]>>16);
+        // Origin HeartGold's a/0/1/8 has no index table: 2 x item + 2 the icon, + 3 its palette.
+        const auto pal=palette(member(narc,hack?2*(*i)[0]+3:(*i)[1]&0xffff));
+        const auto graphic=member(narc,hack?2*(*i)[0]+2:(*i)[1]>>16);
         const auto tile=slice(graphic,block(graphic,"RAHC")+32,512);
         if(pal.size()<16)continue;
         auto& icon=icons[(*i)[0]];
@@ -523,6 +745,7 @@ std::vector<std::vector<uint32_t>> ds_hud_item_icons(const std::vector<uint8_t>&
 // a 16-byte record per move with PP at +6; Black / White and their sequels' a/0/2/1, PP at +5). Checked against two
 // moves every one of these games gives 35 (Pound, Tackle); empty when the cart doesn't match.
 std::vector<uint8_t> ds_move_base_pp(const std::vector<uint8_t>& rom,DsGame game){
+ if(origin_active(game))return ds_origin()->basePp;
  try{
   const bool unova=ds_unova(game);
   const auto narc=file(rom,unova?"/a/0/2/1":game==DsGame::Platinum?"/poketool/waza/pl_waza_tbl.narc":"/a/0/1/1");

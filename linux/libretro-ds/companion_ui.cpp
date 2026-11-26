@@ -126,6 +126,14 @@ void DsCompanionUi::set_game(DsGame value,bool soulSilverVersion){
     default:presentation.title=nullptr;break;
   }
   frame.availableTabs=dsTabs;
+  pd_type_fairy9=0;
+  if(game==DsGame::Johto&&ds_origin()){
+    // Origin HeartGold: no GUIDE (its world isn't HeartGold's), Fairy as type 9.
+    presentation.title="Pokémon Origin HeartGold";
+    frame.availableTabs=dsTabs&~(1<<PD_TAB_GUIDE);
+    if(frame.tab==PD_TAB_GUIDE)frame.tab=PD_TAB_PARTY;
+    pd_type_fairy9=1;
+  }
   if(game==DsGame::Unsupported){
     frame.availableTabs=1<<PD_TAB_PARTY;
     frame.tab=PD_TAB_SETTINGS;
@@ -242,7 +250,7 @@ void DsCompanionUi::draw_body(pd_ui* u,pd_canvas* c){
         dexCachedSpecies=dexEntry;
       }
       if(dexSection==DsDexSection::Area && !dexSpotsReady){
-        dexSpots=ds_guide_spots(game,dexEntry,soulSilver);
+        if(!ds_origin())dexSpots=ds_guide_spots(game,dexEntry,soulSilver);
         dexSpotsReady=true;
       }
       const auto* details=size_t(dexEntry)<dexArt.details.size()?&dexArt.details[dexEntry]:nullptr;

@@ -3470,6 +3470,12 @@ the text banks 791 / 803 / 711, heights / weights in `/a/0/7/4`, abilities u16 (
 machines by its own rule (the species' `/data/tutor_moves.narc` list or its learnset, RETURN anyone, MEW all), fronts from
 `/data/pokepic_m.narc` (member 8 x species, 160 x 80, linear, unscrambled - a 37.6 MB archive, so `NdsArt.file` takes up to
 48 MB). The save's Pokedex keeps 0xC8-byte flag arrays (`Gen4Config.dexFlagBytes`). No GUIDE (its world isn't HeartGold's).
+The DS libretro core (Capsule on iPhone and PC) has the same companion: `ds_origin_cart` (the same pool-word check) and
+`ds_origin_read` (`linux/dsperate/map_art.cpp`) read these tables from the cart at load, `ds_select_origin` points HeartGold's
+reader (`DsGame::Johto`) at the hack's addresses and offsets, and the names, types, icons and DEX come from the tables. The
+fronts are kept as each species' first frame (80 x 40 bytes and 16 colours, 6.6 MB) rather than the whole archive. No battle
+strip and no GUIDE there. `ds-origin-check ROM mainram.bin [OUT]` checks it against the `origin_heartgold` fixture (not in ctest:
+it needs the cart).
 
 **Heartfelt Gold** (v1.0.15, SHA-1 `b2b27aeb…`; its Zoomed In camera patch `2eaf49cc…`; 2026-11-16): hg-engine over the
 *US* HeartGold, so unlike Origin HeartGold it keeps the US cart's layout: overlays 0-128 where retail has them (23 more

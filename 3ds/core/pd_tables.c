@@ -68,11 +68,14 @@ const char* pd_move_name(const struct pd_game* g, int move, char* buf, size_t le
     return buf;
 }
 
+int pd_type_fairy9;
+
 const char* pd_type_name(const struct pd_game* g, int type) {
     const struct pd_text* t = hack_text(g);
     if (t && t->typeNames) {
         return type >= 0 && type < t->typeNamesCount && t->typeNames[type] ? t->typeNames[type] : "";
     }
+    if (type == 9 && pd_type_fairy9) return "Fairy";
     if (type >= 0 && type < pd_type_names_count && pd_type_names[type]) return pd_type_names[type];
     return "";
 }

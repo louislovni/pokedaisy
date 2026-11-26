@@ -50,6 +50,8 @@ extern const int pd_species_names_count;
 extern const struct pd_move_info pd_moves[];
 extern const int pd_moves_count;
 extern const char* const pd_type_names[];
+// A DS hack that puts Fairy in type 9's place (Origin HeartGold): pd_type_name says Fairy for it.
+extern int pd_type_fairy9;
 extern const int pd_type_names_count;
 extern const struct pd_type_pair pd_type_chart[];
 extern const int pd_type_chart_count;

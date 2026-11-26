@@ -17,6 +17,27 @@ DsGame ds_select_cart(const char code[4],int revision,bool* soulSilver);
 // Maps the digest of a known decrypted dump to the digest of the retail dump it
 // is the same ROM as, so every digest check downstream sees one id per game.
 const char* ds_canonical_sha1(const char* sha1);
+// Origin HeartGold (v4.0.3, English patch 1.0.0-rc8; OriginHeartGold.kt): a Japanese HeartGold's header (IPKJ rev 0)
+// told apart by SaveData_Get's pool word. It runs as DsGame::Johto at its own addresses, with its tables read from the
+// player's cart (map_art.cpp's ds_origin_read): 1025 species and their forms to 1440, 920 moves, Fairy as type 9.
+struct DsOrigin {
+  std::vector<std::string> species, moves, items;
+  std::vector<std::array<int8_t,2>> speciesTypes; // by species / form id
+  std::vector<std::array<int16_t,2>> moveMeta;    // by move: type, power
+  std::vector<uint8_t> basePp;
+  std::vector<int> machines;                      // TM01 .. TM92, HM01 .. HM08, TM93 .. TM130
+  std::vector<int32_t> wildRates;                 // map header, walking rate, surfing rate, ...
+  std::vector<std::array<uint16_t,3>> forms;      // species, form, the form's own species id
+  int form_species(int species,int form)const{
+    if(form)for(const auto& f:forms)if(f[0]==species&&f[1]==form)return f[2];
+    return species;
+  }
+};
+inline constexpr int dsOriginLastNational=1025, dsOriginLastSpecies=1440;
+bool ds_origin_cart(const std::vector<uint8_t>& rom);
+// Selects Origin HeartGold (its addresses, its tables) after ds_select_cart; null clears it.
+void ds_select_origin(const DsOrigin* tables);
+const DsOrigin* ds_origin();
 int ds_egg_icon(DsGame game);
 struct DsMon {
   int species=0, level=0, hp=0, maxHp=0, heldItem=0;

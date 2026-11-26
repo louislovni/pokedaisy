@@ -45,10 +45,27 @@ uint32_t johtoSave=pd_ds_data::johto_saveDataPtr, johtoField=uint32_t(pd_ds_data
 uint32_t unovaControl[4]={pd_ds_data::unova_saveControlPtr,0x020a72b8,0x0209a338,0x0209a378};
 const char* unovaCode[4]={"IRBO","IRAO","IREO","IRDO"};
 int unovaIndex(DsGame g){return g==DsGame::Black?0:g==DsGame::White?1:g==DsGame::Black2?2:3;}
+const DsOrigin* origin=nullptr;
 }
+// Gen4Reader.kt's GEN4_ORIGIN_HEARTGOLD: HeartGold's layout with the hack's bigger chunks (130 TMs, 1600 dex bits).
+namespace origin {
+constexpr uint32_t saveDataPtr=0x021D11B4, fieldSystemPtr=0x021D31F4;
+constexpr uint32_t locationOff=0x1324, repelStepsOff=0x6A48+0x65, pokedexOff=0x13A8, nationalDexOff=0x367;
+constexpr uint32_t dexFlagBytes=0xC8, flagsOff=0xEAC+0x170*2, pokegearWordOff=0xBC84+4;
+constexpr int pockets[]={165,50,151,12,40,64,24,30};
+}
+bool ds_origin_cart(const std::vector<uint8_t>& rom){
+  return pk_nds_origin_heartgold(rom.data(),uint32_t(std::min<size_t>(rom.size(),0xffffffffu)))!=0;
+}
+void ds_select_origin(const DsOrigin* tables){
+  cart::origin=tables;
+  if(tables){cart::johtoSave=origin::saveDataPtr;cart::johtoField=origin::fieldSystemPtr;}
+}
+const DsOrigin* ds_origin(){return cart::origin;}
 DsGame ds_select_cart(const char code[4],int revision,bool* soulSilver){
   cart::platinumSave=pd_ds_data::saveDataPtr;cart::platinumField=pd_ds_data::fieldSystemPtr;
   cart::johtoSave=pd_ds_data::johto_saveDataPtr;cart::johtoField=uint32_t(pd_ds_data::pg_fieldSystemPtr);
+  cart::origin=nullptr;
   const uint32_t usControl[4]={pd_ds_data::unova_saveControlPtr,0x020a72b8,0x0209a338,0x0209a378};
   static const char* usCode[4]={"IRBO","IRAO","IREO","IRDO"};
   for(int i=0;i<4;++i){cart::unovaControl[i]=usControl[i];cart::unovaCode[i]=usCode[i];}
@@ -68,7 +85,7 @@ DsGame ds_select_cart(const char code[4],int revision,bool* soulSilver){
   return DsGame::Unsupported;
 }
 bool ds_unova_sequel(DsGame game){return game==DsGame::Black2||game==DsGame::White2;}
-int ds_egg_icon(DsGame game){return ds_unova(game)?650:pd_ds_data::iconEgg;}
+int ds_egg_icon(DsGame game){return ds_unova(game)?650:game==DsGame::Johto&&cart::origin?dsOriginLastSpecies+1:pd_ds_data::iconEgg;}
 const char* ds_canonical_sha1(const char* digest){
   using namespace pd_ds_data;
   // Decrypted dumps: the secure area differs, the rest of the file (every offset the
@@ -100,12 +117,14 @@ bool decode_mon(const uint8_t* raw,size_t size,DsMon& mon,DsGame game) {
   const char* order=pd_ds_data::orders[((pid>>13)&31)%24];
   auto block=[&](char c){return blocks+32*(std::strchr(order,c)-order);};
   const uint8_t *a=block('A'),*b=block('B'),*c=block('C');
-  int species=u16(a);if(species<1 || species>(unova?649:493))return false;
+  int species=u16(a);if(species<1 || species>(unova?649:game==DsGame::Johto&&cart::origin?dsOriginLastSpecies:493))return false;
   uint8_t party[100];static_assert(pd_ds_data::monSize-pd_ds_data::boxSize==sizeof party);
   const size_t partySize=record-pd_ds_data::boxSize;
   std::memcpy(party,raw+pd_ds_data::boxSize,partySize);
   if(flags&1) { if(!sane(party))return false; }
   else {crypt(party,partySize,pid);if(!sane(party)){std::memcpy(party,raw+pd_ds_data::boxSize,partySize);if(!sane(party))return false;} }
+  // Origin HeartGold: a form is its own species id (its names, types and icon), past 1025.
+  if(game==DsGame::Johto&&cart::origin)species=cart::origin->form_species(species,b[24]>>3);
   mon={};mon.species=species;mon.personality=pid;mon.level=party[4];mon.hp=u16(party+6);mon.maxHp=u16(party+8);
   mon.status=u32(party);mon.heldItem=u16(a+2);mon.experience=u32(a+8);mon.egg=(u32(b+16)>>30)&1;
   mon.gender=(b[24]&4)?0:(b[24]&2)?2:1;
@@ -160,10 +179,10 @@ template<size_t N> bool read_bag(const Ram& ram,uint32_t addr,const int (&capaci
 
 void read_dex(const Ram& ram,uint32_t address,DsCompanion& out,unsigned nationalOff){
   using namespace pd_ds_data;
-  const bool unova=ds_unova(out.game);
-  const unsigned count=unova?649:dexMax;
-  const unsigned stride=unova?0x54:64, caughtBase=unova?8:dexCaughtBase;
-  const auto* dex=ram.at(address,unova?caughtBase+5*stride:dexSize);
+  const bool unova=ds_unova(out.game),hack=out.game==DsGame::Johto&&cart::origin;
+  const unsigned count=unova?649:hack?dsOriginLastNational:dexMax;
+  const unsigned stride=unova?0x54:hack?origin::dexFlagBytes:64, caughtBase=unova?8:dexCaughtBase;
+  const auto* dex=ram.at(address,unova?caughtBase+5*stride:hack?std::max(4+4*stride+0x50,nationalOff+1):dexSize);
   if(!dex||u32(dex)!=dexMagic)return;
   out.dexValid=true;
   out.nationalDex=!unova&&dex[nationalOff]!=0;
@@ -192,23 +211,26 @@ DsCompanion read_other_companion(const Ram& ram,DsGame game){
   DsCompanion out;
   out.game=game;
   if(game==DsGame::Johto){
+    const bool hack=cart::origin!=nullptr;
+    const uint32_t locationOff=hack?origin::locationOff:johto_locationOff, flagsOff=hack?origin::flagsOff:pg_flagsOff;
     const uint32_t save=ram.word(cart::johtoSave);
-    if(!ram.at(save,johto_locationOff+johto_bodyOff+4))return out;
+    if(!ram.at(save,locationOff+johto_bodyOff+4))return out;
     const uint32_t body=save+johto_bodyOff;
     const auto* trainer=ram.at(body+johto_trainerOff,johto_kantoBadgesOff+1);
-    if(!trainer||!read_party(ram,body+johto_partyOff,out)||!read_bag(ram,body+johto_bagOff,johtoPockets,out))return {};
+    if(!trainer||!read_party(ram,body+johto_partyOff,out)||
+       !(hack?read_bag(ram,body+johto_bagOff,origin::pockets,out):read_bag(ram,body+johto_bagOff,johtoPockets,out)))return {};
     out.trainer=text(trainer,8);out.money=u32(trainer+20);
     out.badges=trainer[26]|(trainer[johto_kantoBadgesOff]<<8);out.playerGender=trainer[24];
-    out.map=ram.word(body+johto_locationOff);
-    if(const auto* flags=ram.at(body+pg_flagsOff,gen4FlagBytes))
+    out.map=ram.word(body+locationOff);
+    if(const auto* flags=ram.at(body+flagsOff,gen4FlagBytes))
       out.eventFlags.assign(flags,flags+gen4FlagBytes);
-    if(const auto* steps=ram.at(body+johto_repelStepsOff,1))out.repelSteps=*steps;
-    read_dex(ram,body+johto_pokedexOff,out,johto_nationalDexOff);
-    const uint32_t gear=ram.word(body+pg_wordOff);
+    if(const auto* steps=ram.at(body+(hack?origin::repelStepsOff:johto_repelStepsOff),1))out.repelSteps=*steps;
+    read_dex(ram,body+(hack?origin::pokedexOff:johto_pokedexOff),out,hack?origin::nationalDexOff:johto_nationalDexOff);
+    const uint32_t gear=ram.word(body+(hack?origin::pokegearWordOff:pg_wordOff));
     out.mapSkin=std::min(5u,(gear>>18)&127);out.mapUnlock=(gear>>27)&3;
     for(unsigned i=0;i<38;++i){
       const unsigned bit=pg_firstFlag+i;
-      const auto* p=ram.at(body+pg_flagsOff+bit/8,1);
+      const auto* p=ram.at(body+flagsOff+bit/8,1);
       if(p&&((*p>>(bit%8))&1))out.arrivals|=uint64_t(1)<<i;
     }
     const auto point=std::find_if(std::begin(pgWorld),std::end(pgWorld),[&](const auto& p){return p[0]==out.map;});
@@ -220,8 +242,8 @@ DsCompanion read_other_companion(const Ram& ram,DsGame game){
     }else if(point!=std::end(pgWorld)){
       out.mapX=(*point)[1];out.mapY=(*point)[2]+2;
     }else{
-      out.mapX=ram.word(body+johto_locationOff+pg_offSpecialSpawn+8)/32;
-      out.mapY=ram.word(body+johto_locationOff+pg_offSpecialSpawn+12)/32+2;
+      out.mapX=ram.word(body+locationOff+pg_offSpecialSpawn+8)/32;
+      out.mapY=ram.word(body+locationOff+pg_offSpecialSpawn+12)/32+2;
     }
   }else if(ds_unova(game)){
     const uint32_t save=unova_save(ram,game);
@@ -319,10 +341,22 @@ int ds_unova_month(const uint8_t* ram,size_t size,DsGame game){
   const auto* month=memory.at(save+vars+2,2);
   return month?u16(month):0;
 }
-const char* ds_species(int id,DsGame game){return ds_unova(game)?name(pd_ds_data::unovaSpecies,id):name(pd_ds_data::species,id);}
-const char* ds_move(int id,DsGame game){return ds_unova(game)?name(pd_ds_data::unovaMoves,id):name(pd_ds_data::moves,id);}
+namespace {
+const char* origin_name(const std::vector<std::string>& names,int id){
+  return id>=0&&size_t(id)<names.size()&&!names[id].empty()?names[id].c_str():"?";
+}
+}
+const char* ds_species(int id,DsGame game){
+  if(game==DsGame::Johto&&cart::origin)return origin_name(cart::origin->species,id);
+  return ds_unova(game)?name(pd_ds_data::unovaSpecies,id):name(pd_ds_data::species,id);
+}
+const char* ds_move(int id,DsGame game){
+  if(game==DsGame::Johto&&cart::origin)return origin_name(cart::origin->moves,id);
+  return ds_unova(game)?name(pd_ds_data::unovaMoves,id):name(pd_ds_data::moves,id);
+}
 const char* ds_item(int id,DsGame game){
   using namespace pd_ds_data;
+  if(game==DsGame::Johto&&cart::origin)return origin_name(cart::origin->items,id);
   if(game==DsGame::Johto)return name(johtoItems,id);
   if(ds_unova_sequel(game)&&id>=0&&size_t(id)<std::size(sequelItems)&&*sequelItems[id])return sequelItems[id];
   return ds_unova(game)?name(unovaItems,id):name(items,id);
@@ -347,17 +381,26 @@ const char* ds_status(const DsMon& m){
 
 int ds_move_type(int id,DsGame game){
   using namespace pd_ds_data;
+  if(game==DsGame::Johto&&cart::origin){
+    const auto& m=cart::origin->moveMeta;return id>0&&size_t(id)<m.size()?m[id][0]:-1;
+  }
   if(ds_unova(game))return id>0&&size_t(id)<std::size(unovaTypes)?unovaTypes[id]:-1;
   return id>0&&size_t(id)<std::size(moveMeta)?moveMeta[id][0]:-1;
 }
 int ds_move_power(int id,DsGame game){
   using namespace pd_ds_data;
+  if(game==DsGame::Johto&&cart::origin){
+    const auto& m=cart::origin->moveMeta;return id>0&&size_t(id)<m.size()?m[id][1]:0;
+  }
   if(ds_unova(game))return id>0 && size_t(id)<std::size(unovaPower)?unovaPower[id]:0;
   return id>0 && size_t(id)<std::size(moveMeta)?moveMeta[id][1]:0;
 }
 int ds_species_type(int id,int slot,DsGame game){
   using namespace pd_ds_data;
   if(id<1||slot<0||slot>1)return -1;
+  if(game==DsGame::Johto&&cart::origin){
+    const auto& t=cart::origin->speciesTypes;return size_t(id)<t.size()?t[id][slot]:-1;
+  }
   if(ds_unova(game))return size_t(id)<std::size(unovaSpeciesTypes)?unovaSpeciesTypes[id][slot]:-1;
   return size_t(id)<std::size(speciesTypes)?speciesTypes[id][slot]:-1;
 }
@@ -381,7 +424,8 @@ DsRepelResult ds_use_repel(const uint8_t* bytes,size_t size,DsGame game,int item
     const uint32_t save=ram.word(johto?cart::johtoSave:cart::platinumSave);
     if(save<0x02000000||save>=0x023e0000)return R::NotAvailable;
     const uint32_t body=save+(johto?johto_bodyOff:bodyOff);
-    bag=body+(johto?johto_bagOff:bagOff);counter=body+(johto?johto_repelStepsOff:repelStepsOff);
+    bag=body+(johto?johto_bagOff:bagOff);
+    counter=body+(johto&&cart::origin?origin::repelStepsOff:johto?johto_repelStepsOff:repelStepsOff);
     slots=johto?johtoPockets[0]:pockets[0];
   }
   const auto* items=ram.at(bag,slots*4);

@@ -459,13 +459,18 @@ uint32_t read32(uint32_t a) {
 void write32(uint32_t a,uint32_t value) {
   if(nds && a>=0x02000000 && a<=0x023ffffc)nds->bus.dma_write32(ds::Cpu::ARM9,a,value);
 }
+DsOrigin originTables;
 void set_wild_rates(){
   const auto now=std::time(nullptr);
   const auto* local=std::localtime(&now);
   const int savedMonth=ds_unova_month(nds->bus.main_ram.get(),nds->bus.main_ram_size(),companionGame);
   const int month=savedMonth>=1 && savedMonth<=12?savedMonth:local?local->tm_mon+1:1;
-  const auto rates=ds_wild_rates(companionGame,month,soulSilver);
-  pk_nds_field_set_rates(rates.triples,rates.count);
+  if(ds_origin()){
+    pk_nds_field_set_rates(originTables.wildRates.data(),int(originTables.wildRates.size()/3));
+  }else{
+    const auto rates=ds_wild_rates(companionGame,month,soulSilver);
+    pk_nds_field_set_rates(rates.triples,rates.count);
+  }
   pk_nds_field_reset_wild();
 }
 void clear_battle() {
@@ -1515,6 +1520,14 @@ RETRO_API bool retro_load_game(const retro_game_info* info){
         byHeader==DsGame::Black2||byHeader==DsGame::White2?ds_battle_style(pd_ds_data::black2Sha1):
         &ds_platinum_battle_style;
       pd_ds::game=pk_nds_field_game(reinterpret_cast<const char*>(rom.data()+12),rom[30]);
+    }
+    // Origin HeartGold: a Japanese HeartGold's header, its own code. HeartGold's companion at its addresses, with its
+    // names, types and art read from the cart; no battle strip (its battle engine is its own).
+    if(pd_ds::companionGame==DsGame::Unsupported&&ds_origin_cart(rom)&&ds_origin_read(rom,pd_ds::originTables)){
+      ds_select_origin(&pd_ds::originTables);
+      pd_ds::companionGame=DsGame::Johto;pd_ds::soulSilver=false;pd_ds::battleStyle=nullptr;
+      pd_ds::game=pk_nds_field_game_rom(rom.data(),uint32_t(rom.size()));
+      log(RETRO_LOG_INFO,"PokeDaisy DS: Origin HeartGold\n");
     }
     ds_battle_set_base_pp({});
     if(pd_ds::battleStyle)

@@ -26,7 +26,7 @@ struct DsDexDetails {
   uint32_t heightDm=0,weightHg=0;
   int growth=-1;
   std::string category,description;
-  std::array<uint8_t,13> machineBits{};
+  std::array<uint8_t,18> machineBits{}; // 13 bytes in the retail games, 18 (138 machines) in Origin HeartGold's
   bool hasMachines=false;
 };
 struct DsDexMove { int level,move; };
@@ -52,3 +52,5 @@ std::vector<DsDexEvolution> ds_dex_evolutions(const DsDexArt&,int species);
 std::vector<std::vector<uint32_t>> ds_hud_item_icons(const std::vector<uint8_t>& rom, DsGame game);
 // Each move's base PP from the cart's move table (empty when it doesn't check out): the battle strip's max PP.
 std::vector<uint8_t> ds_move_base_pp(const std::vector<uint8_t>& rom, DsGame game);
+// Origin HeartGold's tables from the player's cart (DsOrigin); false when they don't read.
+bool ds_origin_read(const std::vector<uint8_t>& rom,DsOrigin& out);
