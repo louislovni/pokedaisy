@@ -31,7 +31,7 @@ set(COOP_SRC ${APP}/pk_coop.c ${APP}/pk_coop_after.c ${APP}/pk_coop_field.c ${AP
   ${APP}/pk_coop_link_end.c ${APP}/pk_coop_link_rewards.c ${APP}/pk_coop_link_start.c ${APP}/pk_coop_link_story.c
   ${APP}/pk_coop_link_wild.c ${APP}/pk_coop_lock.c)
 file(GLOB PD_CORE CONFIGURE_DEPENDS ../3ds/core/*.c)
-add_library(pokedaisy_gbc_libretro SHARED ${MGBA_SRC} pd_libretro.c pd_lr_mem.c pd_bwsprite.c ${PD_CORE}
+add_library(pokedaisy_gbc_libretro SHARED ${MGBA_SRC} pd_libretro.c pd_lr_mem.c pd_bwsprite.c pd_dsweather.c ${PD_CORE}
   ../linux/hud.c ../linux/quick_menu.c ../linux/fly.c ../linux/flight.c ../linux/flash.c ../linux/field_items.c ../linux/wild.c ../linux/gb_field.c
   ../linux/polished_field.c
   pd_flight_area.c ${APP}/pk_call.c ${APP}/pk_flight.c ${APP}/pk_wide.c ${APP}/pk_wide_gb.c ${APP}/pk_gb_field.c

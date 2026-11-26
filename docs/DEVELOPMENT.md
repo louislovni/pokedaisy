@@ -4115,6 +4115,26 @@ Its manual page is a draft, `docs/manual-drafts/coop.md` (its top note says what
 - **Message types** (`CoopWire`): 0x0001-0x00FF the link's own (HELLO, PAIR_ACCEPT, PAIR_DENY, BYE); 0x0100-0x01FF plan 3,
   0x0200-0x02FF plan 4, 0x0300-0x03FF plan 5; others are dropped on receipt.
 
+## DS weather and seasons (Capsule's GBA core)
+
+Capsule's libretro GBA core (`libretro/pd_dsweather.c`, glue in `pd_libretro.c`'s DS WEATHER section) draws two things over a GBA
+game's field outdoors. **DS WEATHER**: HeartGold / SoulSilver's rain, heavy rain, snow and sandstorm, decoded at load from the
+player's own cart (any language, header `IPK?` / `IPG?`; nothing bundled) out of the field weather's archive `a/0/6/3`
+(pret/pokeheartgold's `weather_manager.c`: members 55-58 list each sprite set's NCGR / NCLR / NCER / NANR; rain 6 / 7 / 5,
+heavy rain 13 / 7 / 12, snow 20 / 21 / 19, blizzard flakes 28 / 21 / 27, diamond dust 24 / 25 / 23, sand 41 / 42 / 40 and
+34 / 35 / 33; the sandstorm's scrolling layer palette 37, characters 36, screen 38). GBA weather 3 is rain, 5 / 13 the heavy
+rain, 4 snow, 8 the sandstorm. The game's own weather sprites are left out of the frame (`pk_wide_weather_hide`, by OBJ palette
+slot): gSprites' in-use entries whose template has GFXTAG_RAIN 0x1206, GFXTAG_SANDSTORM 0x1204 or (snow) TAG_NONE on
+PALTAG_WEATHER 0x1200 (pokeemerald's `field_weather.h`), so only in Emerald and FireRed / LeafGreen (BATTLE SPRITES' gSprites);
+elsewhere the game keeps its weather. The movement is ours, after the DS games'. **SEASONS**: Black / White's (January spring,
+February summer, March autumn, April winter, and again) or the calendar's: the map's greens recoloured (`pk_season_set`: BG
+palettes 0-12, as DAY AND NIGHT's tint is applied, palette RAM untouched) and on fine days (weather 0-2) petals, leaves or snow
+drawn from small drawings of our own (the DS games have no such particles; winter uses the cart's snowflakes and diamond dust
+when it's there). `retro_pd_weather_cart` / `retro_pd_ambience(dsWeather, seasons)` (0 off, 1 Black / White, 2 calendar, 3-6 one
+season always, for tests); `retro_pd_scene`'s values 8 / 9 tell the frontend the core drew the weather / a season, so its own
+weather layer keeps only its colours. Headless: the core over a French Emerald save on Route 120 (7, 15)'s rain trigger and
+Route 111's desert.
+
 ## Releasing
 
 See [RELEASING.md](RELEASING.md): `make bump V=x.y.z`, merge, `make release` (tags

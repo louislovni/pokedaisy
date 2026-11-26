@@ -845,14 +845,62 @@ static inline uint16_t tint555(uint16_t c) {
     return (uint16_t) (r | g << 5 | b << 10);
 }
 
+// SEASONS (Capsule's build, pk_season_set): the map's greens in the season's colours - autumn's orange and red, winter's
+// frost, spring's fresher green, summer's deeper one - mixed in by [seasonK] (0..256), BG palettes 0-12 only (people and
+// Pokémon keep theirs), before DAY AND NIGHT's tint. Water, roofs and paths aren't green, so they stay.
+static int seasonKind = -1, seasonK;
+static uint16_t whPalettes;   // DS WEATHER's hidden OBJ palettes (weatherHideBegin)
+
+static inline uint16_t season555(uint16_t c) {
+    int r = c & 31, g = (c >> 5) & 31, b = (c >> 10) & 31;
+    int top = r > b ? r : b;
+    int green = g - top;                       // how much greener than anything else
+    if (green <= 0 || g < 4) return c;
+    int w = green * 40 > 256 ? 256 : green * 40; // a fully green colour by 7 steps
+    w = w * seasonK >> 8;
+    int nr = r, ng = g, nb = b;
+    switch (seasonKind) {
+    case 0: // spring: lighter, a touch of yellow
+        nr = r + (g - r) / 4 + 1; ng = g + 2; nb = b;
+        break;
+    case 1: // summer: deep and saturated
+        nr = r * 3 / 4; ng = g; nb = b * 3 / 4;
+        break;
+    case 2: // autumn: the dark greens (the trees' shade) red-brown and orange, the light ones (grass) gold
+        nr = g + 4; ng = g * (6 + 7 * g / 31) / 16; nb = b / 3;
+        w = w * 7 / 8;
+        break;
+    case 3: { // winter: frosted, pale blue-white, the shapes kept
+        int l = (r + g * 2 + b) / 4;
+        nr = l * 2 / 3 + 8; ng = l * 2 / 3 + 9; nb = l * 2 / 3 + 12;
+        w = w * 5 / 8;
+        break;
+    }
+    default:
+        return c;
+    }
+    nr = nr > 31 ? 31 : nr; ng = ng > 31 ? 31 : ng; nb = nb > 31 ? 31 : nb;
+    r += (nr - r) * w >> 8; g += (ng - g) * w >> 8; b += (nb - b) * w >> 8;
+    return (uint16_t) (r | g << 5 | b << 10);
+}
+
 static void tintPalettes(struct GBAVideoRenderer* r, const uint16_t* pal) {
-    bool on = tintR != 256 || tintG != 256 || tintB != 256;
+    bool tinted = tintR != 256 || tintG != 256 || tintB != 256;
+    bool seasoned = seasonKind >= 0 && seasonK > 0;
+    bool on = tinted || seasoned;
     if ((!on && !tintShown) || !r->writePalette) return;
     for (int i = 0; i < 512; i++) {
         if (i >= 13 * 16 && i < 256) continue;
-        r->writePalette(r, (uint32_t) (i * 2), on ? tint555(pal[i]) : pal[i]);
+        uint16_t c = pal[i];
+        if (seasoned && i < 13 * 16) c = season555(c);
+        r->writePalette(r, (uint32_t) (i * 2), tinted ? tint555(c) : c);
     }
     tintShown = on;
+}
+
+void pk_season_set(int kind, int strength) {
+    seasonKind = kind;
+    seasonK = strength < 0 ? 0 : strength > 256 ? 256 : strength;
 }
 
 // FOLLOWER (companion/data/Follower.kt): a Pokémon walking a tile behind the player, drawn as one more hardware sprite -
@@ -964,6 +1012,9 @@ void pk_wide_extras_reset(void) {
     followOam = followSlot = -1;
     tintR = tintG = tintB = 256;
     tintShown = false;
+    seasonKind = -1;
+    seasonK = 0;
+    whPalettes = 0;
     menuHideMode = 0;
     menuHideTypeFlags = 0;
 }
@@ -1132,6 +1183,38 @@ static void battleHideBegin(struct GBAVideoRenderer* r) {
     }
 }
 
+// DS WEATHER (pk_wide_weather_hide): the game's own weather sprites - every OAM entry in these OBJ palettes - left out of
+// each frame while a frontend draws HeartGold's weather in their place.
+static uint8_t whOam[128];
+static uint16_t whSaved[128];
+static int whN;
+
+void pk_wide_weather_hide(uint16_t paletteMask) { whPalettes = paletteMask; }
+
+static void weatherHideBegin(struct GBAVideoRenderer* r) {
+    whN = 0;
+    if (!whPalettes || !hookGba) return;
+    uint16_t* oam = hookGba->video.oam.raw;
+    for (int i = 0; i < 128; i++) {
+        uint16_t a0 = oam[i * 4], a2 = oam[i * 4 + 2];
+        if ((a0 & 0x300) == 0x200 || (a0 & 0x2000)) continue;   // off, or 256 colours (no palette slot)
+        if (!(whPalettes & (1u << (a2 >> 12)))) continue;
+        whOam[whN] = (uint8_t) i;
+        whSaved[whN++] = a0;
+        oam[i * 4] = (uint16_t) ((a0 & ~0x300) | 0x200);
+        r->writeOAM(r, (uint32_t) i * 4);
+    }
+}
+
+static void weatherHideEnd(struct GBAVideoRenderer* r) {
+    if (!hookGba) return;
+    for (int k = 0; k < whN; k++) {
+        hookGba->video.oam.raw[whOam[k] * 4] = whSaved[k];
+        r->writeOAM(r, (uint32_t) whOam[k] * 4);
+    }
+    whN = 0;
+}
+
 static void battleHideEnd(struct GBAVideoRenderer* r) {
     if (!hookGba) return;
     if (bsDispcnt && r->writeVideoRegister) r->writeVideoRegister(r, 0, hookGba->memory.io[0]);
@@ -1194,9 +1277,9 @@ static void hookDrawScanline(struct GBAVideoRenderer* r, int y) {
         }
         lineOamOf[y] = (uint8_t) (lineOamN - 1);
     }
-    if (y == 0) { followBegin(r); rideBegin(r); partnerBegin(r); flyBegin(r); menuHideBegin(r); battleHideBegin(r); }
+    if (y == 0) { followBegin(r); rideBegin(r); partnerBegin(r); flyBegin(r); menuHideBegin(r); battleHideBegin(r); weatherHideBegin(r); }
     origDrawScanline(r, y);
-    if (y == PK_WIDE_H - 1) { battleHideEnd(r); menuHideEnd(r); flyEnd(r); partnerEnd(r); rideEnd(r); followEnd(r); }
+    if (y == PK_WIDE_H - 1) { weatherHideEnd(r); battleHideEnd(r); menuHideEnd(r); flyEnd(r); partnerEnd(r); rideEnd(r); followEnd(r); }
 }
 
 static void hookScanlines(struct GBA* gba) {
@@ -1356,7 +1439,7 @@ static int score(const struct Snap* s, int cx, int cy, int hofs, int vofs) {
 
 static inline uint32_t color(uint16_t c, uint32_t alpha) {
     // DAY AND NIGHT: the margins (the map and its people, from palette RAM) tinted as the renderer's frame is.
-    if (tintShown) c = tint555(c);
+    if (tintShown) c = tint555(seasonKind >= 0 && seasonK > 0 ? season555(c) : c);
     uint32_t v = (uint32_t) (c & 0x1F) << 3 | (uint32_t) ((c >> 5) & 0x1F) << 11 | (uint32_t) ((c >> 10) & 0x1F) << 19;
     return v | ((v >> 5) & 0x070707) | alpha;   // mGBA's mColorFrom555
 }

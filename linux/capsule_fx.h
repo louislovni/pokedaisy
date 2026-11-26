@@ -236,11 +236,14 @@ struct fx_scene {
   bool battle, field;
   int cave;
   int tint[3];
+  bool coreWeather; /* DS WEATHER: the core draws the weather's particles (HeartGold's), its colours stay ours */
 };
 static bool fx_read(struct fx_scene *s) {
-  int v[8];
-  if (!fx.scene || fx.scene(v, 8) < 8)
+  int v[10];
+  int got = fx.scene ? fx.scene(v, 10) : 0;
+  if (got < 8)
     return false;
+  s->coreWeather = got >= 9 && v[8] > 0;
   s->weather = v[0];
   s->mapType = v[1];
   s->battle = v[2] != 0;
@@ -390,7 +393,7 @@ static void fx_overlay(SDL_Renderer *r, SDL_Rect f, int fw, int fh, bool on, int
   if (w >= 0 && k > 0) {
     if (w == 3 || w == 5 || w == 13) { // rain; storms heavier, with lightning
       bool heavy = w != 3;
-      int n = heavy ? FX_DROPS : FX_DROPS * 6 / 10;
+      int n = s->coreWeather ? 0 : heavy ? FX_DROPS : FX_DROPS * 6 / 10;
       SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
       SDL_SetRenderDrawColor(r, 205, 215, 255, (Uint8)(k * (heavy ? 120 : 95)));
       float len = 0.05f, slant = 0.28f;
@@ -417,7 +420,7 @@ static void fx_overlay(SDL_Renderer *r, SDL_Rect f, int fw, int fh, bool on, int
         fx.flash = 1;
         fx.nextFlash = ticks + 4000 + (uint32_t)(fx_rand() * 7000);
       }
-    } else if (w == 4) { // snow
+    } else if (w == 4 && !s->coreWeather) { // snow
       for (int i = 0; i < FX_FLAKES; i++) {
         float *d = fx.flakes[i];
         d[1] += dt * 0.12f * d[2];
@@ -450,7 +453,7 @@ static void fx_overlay(SDL_Renderer *r, SDL_Rect f, int fw, int fh, bool on, int
         fx_disc(r, f.x + x * f.w, f.y + d[1] * f.h, 1.2f * px, 1.2f * px, 90, 88, 86, k * 0.8f);
         SDL_SetTextureBlendMode(fx.disc, SDL_BLENDMODE_ADD);
       }
-    } else if (w == 8) { // sandstorm: tan, blowing fast
+    } else if (w == 8 && !s->coreWeather) { // sandstorm: tan, blowing fast
       SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
       SDL_SetRenderDrawColor(r, 200, 160, 100, (Uint8)(k * 60));
       SDL_RenderFillRect(r, &f);
@@ -548,6 +551,31 @@ static bool fx_find_bw(const char *dir, char *out, size_t n) {
     FILE *f = fopen(path, "rb");
     unsigned char h[16];
     if (f && fread(h, 1, 16, f) == 16 && h[0xC] == 'I' && h[0xD] == 'R' && strchr("BAED", h[0xE]) && h[0xE]) {
+      snprintf(out, n, "%s", path);
+      found = true;
+    }
+    if (f)
+      fclose(f);
+  }
+  if (d)
+    closedir(d);
+  return found;
+}
+
+/* DS WEATHER: the first Pokémon HeartGold / SoulSilver cart (any language: header IPK? IPG?) in [dir], into [out]. */
+static bool fx_find_hgss(const char *dir, char *out, size_t n) {
+  DIR *d = dir ? opendir(dir) : NULL;
+  struct dirent *e;
+  bool found = false;
+  while (d && !found && (e = readdir(d))) {
+    const char *ext = strrchr(e->d_name, '.');
+    if (!ext || strcasecmp(ext, ".nds"))
+      continue;
+    char path[PATH_MAX];
+    snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
+    FILE *f = fopen(path, "rb");
+    unsigned char h[16];
+    if (f && fread(h, 1, 16, f) == 16 && h[0xC] == 'I' && h[0xD] == 'P' && (h[0xE] == 'K' || h[0xE] == 'G')) {
       snprintf(out, n, "%s", path);
       found = true;
     }

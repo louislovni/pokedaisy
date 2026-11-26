@@ -499,7 +499,9 @@ static struct {
   int look;          // LOOK (Capsule's build, capsule_fx.h): ORIGINAL / SMOOTH HD / CRT / REMASTER
   bool weatherFx;    // WEATHER AND LIGHTS (Capsule's build, capsule_fx.h)
   bool battleSprites; // BATTLE SPRITES (Capsule's build): Black / White's animated pictures in Emerald's battles
-} hostSet = {0, false, false, false, {R2, L2, -1, -1}, {R2, L2, -1, -1}, SELECT, true, 0, true, true};
+  bool dsWeather;     // DS WEATHER (Capsule's build): HeartGold / SoulSilver's rain, snow and sand in place of the game's
+  int seasons;        // SEASONS (Capsule's build): 0 off, 1 Black / White's (a new one each month), 2 the calendar's
+} hostSet = {0, false, false, false, {R2, L2, -1, -1}, {R2, L2, -1, -1}, SELECT, true, 0, true, true, true, 1};
 static char hostIni[PATH_MAX];
 /* A DS game's L2 / R2 are its companion and screen buttons: with no modifier held for them, its FAST FORWARD and REWIND
  * go back to the stick clicks (R3 / L3), and come back to R2 / L2 when a modifier is picked again. */
@@ -542,6 +544,10 @@ static void host_load(void) {
       hostSet.weatherFx = v != 0;
     if (sscanf(line, "battle_sprites=%d", &v) == 1)
       hostSet.battleSprites = v != 0;
+    if (sscanf(line, "ds_weather=%d", &v) == 1)
+      hostSet.dsWeather = v != 0;
+    if (sscanf(line, "seasons=%d", &v) == 1)
+      hostSet.seasons = v >= 0 && v <= 2 ? v : 1;
     if (sscanf(line, "swap_ab=%d", &v) == 1)
       hostSet.swapAB = v != 0;
     for (int i = 0; i < KB_BINDS; i++) { // kb_<id>=<SDL key name> (the KEYS page)
@@ -586,7 +592,8 @@ static void host_save(void) {
     return;
   fprintf(f, "ff_speed=%d\nrewind=%d\nlcd=%d\nswap_ab=%d\ncapsule_frame=%d\n", hostSet.ffSpeed, hostSet.rewind, hostSet.lcd,
           hostSet.swapAB, hostSet.capsuleFrame);
-  fprintf(f, "look=%d\nweather_fx=%d\nbattle_sprites=%d\n", hostSet.look, hostSet.weatherFx, hostSet.battleSprites);
+  fprintf(f, "look=%d\nweather_fx=%d\nbattle_sprites=%d\nds_weather=%d\nseasons=%d\n", hostSet.look, hostSet.weatherFx,
+          hostSet.battleSprites, hostSet.dsWeather, hostSet.seasons);
   for (int i = 0; i < KB_BINDS; i++)
     if (kbBinds[i].key != kbBinds[i].def)
       fprintf(f, "kb_%s=%s\n", kbBinds[i].id, SDL_GetKeyName(kbBinds[i].key));
@@ -1624,8 +1631,8 @@ extern int pd_ds_run(const char *, const char *, int, const char *, SDL_Renderer
 static bool ds_running(void) { return running != 0; }
 #endif
 // The host menu's rows, top to bottom (fast-forward is the FAST FORWARD hotkey's, held).
-enum { M_RESUME, M_SAVE, M_LOAD, M_HISTORY, M_COOP, M_KEYS, M_HOTKEYS, M_REWIND, M_FFSPEED, M_LOOK, M_WEATHER, M_SPRITES, M_LCD, M_FRAME,
-       M_SWAP, M_QUIT, M_COUNT };
+enum { M_RESUME, M_SAVE, M_LOAD, M_HISTORY, M_COOP, M_KEYS, M_HOTKEYS, M_REWIND, M_FFSPEED, M_LOOK, M_WEATHER, M_DSWEATHER,
+       M_SEASONS, M_SPRITES, M_LCD, M_FRAME, M_SWAP, M_QUIT, M_COUNT };
 /* SAVE HISTORY (the host menu, Capsule's build): the save's backups to go back to, newest first, by date. A pick asks
  * first; then the game closes (its progress written and backed up like any other, so going back can be undone), the
  * backup becomes the save and the game opens again on it. */
@@ -1767,6 +1774,27 @@ static void battle_sprites_follow(const char *gamePath) {
   bool found = hostSet.battleSprites && (fx_find_bw(dir, cart, sizeof cart) || fx_find_bw(roms, cart, sizeof cart));
   set(found ? cart : NULL);
 }
+/* DS WEATHER and SEASONS: the core told of a HeartGold / SoulSilver cart beside the game (or in DATA/roms) and what's on. */
+static void ambience_follow(const char *gamePath) {
+  void (*cart)(const char *) = (void (*)(const char *))dlsym(core.dl, "retro_pd_weather_cart");
+  void (*set)(int, int) = (void (*)(int, int))dlsym(core.dl, "retro_pd_ambience");
+  if (!cart || !set)
+    return;
+  char dir[PATH_MAX], found[PATH_MAX], roms[PATH_MAX];
+  snprintf(dir, sizeof dir, "%s", gamePath);
+  char *slash = strrchr(dir, '/');
+  char *back = strrchr(dir, '\\');
+  if (back && (!slash || back > slash))
+    slash = back;
+  if (slash)
+    *slash = 0;
+  else
+    snprintf(dir, sizeof dir, ".");
+  snprintf(roms, sizeof roms, "%s/roms", root);
+  bool have = hostSet.dsWeather && (fx_find_hgss(dir, found, sizeof found) || fx_find_hgss(roms, found, sizeof found));
+  cart(have ? found : NULL);
+  set(hostSet.dsWeather, hostSet.seasons);
+}
 #endif
 static void run_game(const char *path, int maxFrames, const char *shot, bool fromList) {
 #ifdef POCKET_DSPERATE
@@ -1889,6 +1917,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
   fx_core((int (*)(int *, int))dlsym(core.dl, "retro_pd_scene"), (int (*)(float *, int))dlsym(core.dl, "retro_pd_lights"));
   if (!dsGame)
     battle_sprites_follow(path);
+    ambience_follow(path);
 #endif
 #ifdef CAPSULE_COOP
   if (!dsGame) {
@@ -1968,6 +1997,9 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
 #endif
     snprintf(rows[M_WEATHER], 40, "%s  %s", pd_tr("WEATHER AND LIGHTS"), ONOFF(hostSet.weatherFx));
     snprintf(rows[M_SPRITES], 40, "%s  %s", pd_tr("BATTLE SPRITES"), ONOFF(hostSet.battleSprites));
+    snprintf(rows[M_DSWEATHER], 40, "%s  %s", pd_tr("DS WEATHER"), ONOFF(hostSet.dsWeather));
+    snprintf(rows[M_SEASONS], 40, "%s  %s", pd_tr("SEASONS"),
+             pd_tr(hostSet.seasons == 1 ? "BLACK AND WHITE" : hostSet.seasons == 2 ? "CALENDAR" : "OFF"));
     snprintf(rows[M_SWAP], 40, "%s  %s", pd_tr("CONTROLLER A/B"), pd_tr(hostSet.swapAB ? "SWAPPED" : "NORMAL"));
     snprintf(rows[M_HOTKEYS], 40, "%s", pd_tr("CONTROLLER HOTKEYS"));
     snprintf(rows[M_KEYS], 40, "%s", pd_tr("KEYBOARD KEYS"));
@@ -1984,7 +2016,8 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     for (int i = 0; i < M_COUNT; i++) {
       if (pure && (i == M_SAVE || i == M_LOAD || i == M_REWIND))
         continue;
-      if (!pure && (i == M_FRAME || i == M_HISTORY || i == M_LOOK || i == M_WEATHER || i == M_SPRITES)) // Capsule's build only
+      if (!pure && (i == M_FRAME || i == M_HISTORY || i == M_LOOK || i == M_WEATHER || i == M_SPRITES || i == M_DSWEATHER ||
+                    i == M_SEASONS)) // Capsule's build only
         continue;
       if (i == M_COOP && !coopRow)
         continue;
@@ -2244,6 +2277,17 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
           host_save();
 #ifdef POCKET_PURE
           battle_sprites_follow(path);
+#endif
+          break;
+        case M_DSWEATHER:
+        case M_SEASONS:
+          if (menuMap[menu.selected] == M_DSWEATHER)
+            hostSet.dsWeather = !hostSet.dsWeather;
+          else
+            hostSet.seasons = (hostSet.seasons + 1) % 3;
+          host_save();
+#ifdef POCKET_PURE
+          ambience_follow(path);
 #endif
           break;
         case M_SWAP:

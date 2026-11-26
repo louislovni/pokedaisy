@@ -1090,6 +1090,9 @@ static int want_canvas(void) {
 /* Follow the aspect: when the wanted canvas differs, resize it and tell the frontend (it rescales to the new whole factor). */
 static void bs_after_run(void);
 static void bs_draw(void);
+static void amb_after_run(void);
+static void amb_draw(void);
+static int ambKind, ambSeasonDrawn; /* DS WEATHER and SEASONS (below) */
 static bool bs_wanted(void);
 static void canvas_update(bool notify) {
   int w = menuW, h = menuH, scale = 1;
@@ -2166,6 +2169,7 @@ RETRO_API void retro_run(void) {
     mgba_retro_run();
     cb_after_frame();
     bs_after_run();
+    amb_after_run();
     autoRunFlip = 0;
     if (freeFlight)
       pk_flight_tick(core);
@@ -2423,6 +2427,7 @@ RETRO_API void retro_run(void) {
     else
       draw_game();
     bs_draw();
+    amb_draw();
     const bool gb = PD_BE_IS_GB();
     hud_field_tick();
     if (settings.hud && game.cfg && host.hasHud && hudFieldFrames >= 20) {
@@ -2532,7 +2537,7 @@ RETRO_API void retro_pd_language(const char *code) { pd_tr_set_language(code); }
  * battle, fade or text box), [4] the cave's flash level (0 lit, -1 unknown), [5..7] DAY AND NIGHT's tint now (r, g, b,
  * 256 = none). Returns how many it wrote (up to n). */
 RETRO_API int retro_pd_scene(int *out, int n) {
-  int v[8];
+  int v[10];
   v[0] = snap.valid ? snap.weather : -1;
   v[1] = snap.valid && snap.posOk ? snap.mapType : -1;
   v[2] = (snap.valid && snap.inBattle) || (fieldFlags & PK_FIELD_BATTLE);
@@ -2541,7 +2546,9 @@ RETRO_API int retro_pd_scene(int *out, int n) {
   v[5] = dayTint[0];
   v[6] = dayTint[1];
   v[7] = dayTint[2];
-  int k = n < 8 ? n : 8;
+  v[8] = ambKind >= 0;     /* DS WEATHER: the core draws the weather's particles */
+  v[9] = ambSeasonDrawn;   /* SEASONS: the season whose particles the core draws, -1 none */
+  int k = n < 10 ? n : 10;
   for (int i = 0; i < k; i++)
     out[i] = v[i];
   return k;
@@ -2839,4 +2846,132 @@ RETRO_API void retro_pd_battle_sprites(const char *ndsPath) { (void)ndsPath; }
 static void bs_after_run(void) {}
 static void bs_draw(void) {}
 static bool bs_wanted(void) { return false; }
+#endif
+
+/* ---- DS WEATHER and SEASONS (Capsule's build): HeartGold / SoulSilver's weather from the player's cart in place of the
+ * game's own, and Black / White's seasons (pd_dsweather.c). The frontend names the cart (retro_pd_weather_cart) and says
+ * what's on (retro_pd_ambience); retro_pd_scene tells it what the core draws, so its own weather leaves that out. The
+ * game's weather sprites are found in gSprites by their template's tags (pokeemerald's field_weather.h: GFXTAG_RAIN 0x1206,
+ * GFXTAG_SANDSTORM 0x1204, the snowflakes' TAG_NONE on PALTAG_WEATHER 0x1200; FireRed's the same) and their OBJ palette
+ * slots left out of the frame (pk_wide_weather_hide): only in Emerald and FireRed / LeafGreen, where BATTLE SPRITES' gSprites
+ * is known; elsewhere the game keeps its weather and the frontend draws its own. */
+#ifndef PD_ARMGBA
+#include "pd_dsweather.h"
+static bool ambDsWeather = true;
+static int ambSeasons;              /* 0 off, 1 Black / White's, 2 the calendar's */
+static int ambKind = -1;            /* the DS weather drawn this frame (DSW_*) */
+static int ambSeasonDrawn = -1;     /* the season's particles drawn this frame */
+static int ambSeasonK;              /* the season's colours, 0..256 */
+
+RETRO_API void retro_pd_weather_cart(const char *ndsPath) {
+  if (!ndsPath || !*ndsPath)
+    dsw_close();
+  else
+    dsw_open(ndsPath);
+}
+RETRO_API void retro_pd_ambience(int dsWeather, int seasons) {
+  ambDsWeather = dsWeather != 0;
+  ambSeasons = seasons >= 1 && seasons <= 6 ? seasons : 0; // 3-6: one season always (spring ... winter)
+}
+
+static bool amb_outdoors(void) {
+  const int type = snap.posOk ? snap.mapType : -1;
+  return type < 0 || type == 1 || type == 2 || type == 3 || type == 6;
+}
+/* The free field outdoors (no battle, menu, companion or quick menu over it), in a game whose screens are known. */
+static bool amb_field(void) {
+  return haveGame && PD_BE_IS_GBA() && wideSupported && snap.valid && !snap.inBattle && !(fieldFlags & PK_FIELD_BATTLE) &&
+         !COMPANION_OVER && !quickOpen && pk_wide_scene() == PK_WIDE_SCENE_FIELD && amb_outdoors();
+}
+static int amb_kind(int weather) {
+  switch (weather) {
+  case 3: return DSW_RAIN;
+  case 5: case 13: return DSW_STORM;
+  case 4: return DSW_SNOW;
+  case 8: return DSW_SAND;
+  default: return DSW_NONE;
+  }
+}
+/* The game's own weather sprites for [kind]: a bit per OBJ palette slot they're drawn in. */
+static uint16_t amb_game_sprites(int kind) {
+  uint8_t spr[64 * 0x44];
+  if (!pd_lr_read_memory(core, BS_SPRITES, spr, sizeof spr))
+    return 0;
+  uint16_t mask = 0;
+  for (int i = 0; i < 64; i++) {
+    const uint8_t *e = spr + i * 0x44;
+    if (!(e[0x3E] & 1))
+      continue;
+    uint32_t tmpl = e[0x14] | e[0x15] << 8 | e[0x16] << 16 | (uint32_t)e[0x17] << 24;
+    uint32_t tags = bs_rom32(tmpl);
+    unsigned tileTag = tags & 0xFFFF, palTag = tags >> 16;
+    bool weather = kind == DSW_SNOW ? tileTag == 0xFFFF && palTag == 0x1200
+                 : kind == DSW_SAND ? tileTag == 0x1204
+                                    : tileTag == 0x1206;
+    if (weather)
+      mask |= (uint16_t)(1u << (e[5] >> 4));
+  }
+  return mask;
+}
+static bool amb_hides(void) {
+  return game.cfg && (game.kind == PD_GAME_EMERALD || game.kind == PD_GAME_FIRERED) &&
+         (game.cfg->battleMons == 0x02024084u || game.cfg->battleMons == 0x02023BE4u);
+}
+/* After each frame: what the next one draws, and the game's sprites it hides. */
+static void amb_after_run(void) {
+  const bool field = amb_field();
+  ambKind = ambDsWeather && dsw_ready() && field && amb_hides() ? amb_kind(snap.weather) : DSW_NONE;
+  pk_wide_weather_hide(ambKind >= 0 ? amb_game_sprites(ambKind) : 0);
+  const int season = haveGame && PD_BE_IS_GBA() ? dsw_season_now(ambSeasons) : SEASON_NONE;
+  // The map's colours: in on the field outdoors (eased, mostly while a door's or a menu's fade comes back), off at once
+  // elsewhere (a menu's own green windows are BG palettes too).
+  const bool colours = season >= 0 && field;
+  ambSeasonK = colours ? (ambSeasonK + 32 > 256 ? 256 : ambSeasonK + 32) : 0;
+  pk_season_set(colours ? season : -1, ambSeasonK);
+  const int w = snap.weather;
+  const bool fine = w == 0 || w == 1 || w == 2;
+  ambSeasonDrawn = field && fine && ambKind < 0 && season >= 0 && season != SEASON_SUMMER ? season : -1;
+  if (!haveGame)
+    dsw_reset();
+}
+static void amb_plot(int x, int y, uint32_t rgb, int a) {
+  if (x < 0 || y < 0 || x >= CW || y >= CH)
+    return;
+  if (direct565) {
+    uint16_t *d = &out565[(size_t)y * CW + x];
+    if (a >= 256) {
+      *d = to565(rgb);
+      return;
+    }
+    uint32_t c = from565(*d);
+    uint32_t r = ((c >> 16 & 255) * (256 - a) + (rgb >> 16 & 255) * a) >> 8, g = ((c >> 8 & 255) * (256 - a) + (rgb >> 8 & 255) * a) >> 8,
+             b = ((c & 255) * (256 - a) + (rgb & 255) * a) >> 8;
+    *d = to565(r << 16 | g << 8 | b);
+    return;
+  }
+  uint32_t *d = &cvs[(size_t)y * CW + x];
+  if (a >= 256) {
+    *d = rgb;
+    return;
+  }
+  uint32_t c = *d;
+  uint32_t r = ((c >> 16 & 255) * (256 - a) + (rgb >> 16 & 255) * a) >> 8, g = ((c >> 8 & 255) * (256 - a) + (rgb >> 8 & 255) * a) >> 8,
+           b = ((c & 255) * (256 - a) + (rgb & 255) * a) >> 8;
+  *d = r << 16 | g << 8 | b;
+}
+static void amb_draw(void) {
+  if (ambKind < 0 && ambSeasonDrawn < 0)
+    return;
+  struct dsw_target t = {amb_plot, CW, CH, wideReady ? game_scale(wideW, wideH) : game_scale(gameW, gameH)};
+  if (ambKind >= 0)
+    dsw_weather(ambKind, &t);
+  else
+    dsw_season(ambSeasonDrawn, &t);
+}
+#else
+RETRO_API void retro_pd_weather_cart(const char *ndsPath) { (void)ndsPath; }
+RETRO_API void retro_pd_ambience(int dsWeather, int seasons) { (void)dsWeather; (void)seasons; }
+static int ambKind = -1, ambSeasonDrawn = -1;
+static void amb_after_run(void) {}
+static void amb_draw(void) {}
 #endif

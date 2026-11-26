@@ -291,6 +291,14 @@ int pk_wide_lights(int x0, int y0, int x1, int y1, int* out, int max);
  * centres: per battler, its sprite's centre while the game keeps it invisible (0x7FFF, 0x7FFF while not, or NULL): a
  * battle anim's copy of it on BG1 / BG2 there is left out of the frame and counted as seen too. */
 void pk_wide_battle_hide(const uint16_t* tiles, const int16_t* centres, int n);
+
+/** DS WEATHER: the OAM entries in these OBJ palettes (a bit each) - the game's own weather sprites - left out of the frames
+ * from the next on (0: none). A frontend draws HeartGold's weather in their place. */
+void pk_wide_weather_hide(uint16_t paletteMask);
+
+/** SEASONS: the map's greens (BG palettes 0-12) in season [kind]'s colours (0 spring, 1 summer, 2 autumn, 3 winter, -1 none),
+ * mixed in by [strength] 0..256, as each frame starts drawing (with DAY AND NIGHT's tint, palette RAM untouched). */
+void pk_season_set(int kind, int strength);
 int pk_wide_battle_seen(int* out, int max);
 
 /** A game closed: FOLLOWER (its sprite, shown or not) and DAY AND NIGHT's tint go back to none, so the next game starts
