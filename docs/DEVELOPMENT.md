@@ -3523,6 +3523,14 @@ headers are hg-engine's `/a/0/5/0` NARC (590 of 24 bytes; the ARM9's retail tabl
 come from it. The art's stamp carries " chaos", so switching between the two rebuilds it. EXPAND, FLY, PC, WILD and the battle
 buttons ran headless as HeartGold's (docs/ROM_FEATURES.md note 41). No GUIDE.
 
+**Heartfelt Gold / Chaos Purple on the DS libretro core** (Capsule's iPhone / PC companion, 2026-11-27): `ds_hg_engine_cart`
+(the US header, hg-engine's 0x111EF8 ARM9, 149 or 152 overlays) and `ds_hg_engine_read` (linux/dsperate) fill a `DsOrigin`
+with `usEngine` set: HeartGold's text banks grown (237 / 750 / 222), the personal records' types, `/a/0/1/1`'s moves, the
+icons' palettes (overlay 129's first bytes / `/a/0/2/8` member 9), the map headers' rates. The US RAM stays; the save offsets
+are `hgus` (HeartfeltGold.kt's GEN4_HEARTFELT_GOLD), the Pokédex by species id (caught +4, seen +0x400, National always) and
+the DEX keyed by species id under `dexOrder` (No.n's species: n to 493, n + 50 after). Checked headless on Chaos Purple with a
+player's save: party, summary, DEX (1025, pages, pictures, sizes from the page text), MAP. Heartfelt has no ROM here yet.
+
 **Renegade Platinum** (Drayano's v1.3.0, SHA-1 `d4ee068b7e0a19a848436369f145e3154afe13ca`): US Platinum rev 1 edited in
 place, header and all (`CPUE` rev 1), so everything that goes by the header (the Poller's `detectDs`,
 `pk_nds_field.cpp`, `pk_nds_call.cpp`, EXPAND, STEADY) runs it as Platinum, and it should: its RAM, save layout and ARM9

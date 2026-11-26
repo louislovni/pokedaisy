@@ -128,8 +128,8 @@ void DsCompanionUi::set_game(DsGame value,bool soulSilverVersion){
   frame.availableTabs=dsTabs;
   pd_type_fairy9=0;
   if(game==DsGame::Johto&&ds_origin()){
-    // Origin HeartGold: no GUIDE (its world isn't HeartGold's), Fairy as type 9.
-    presentation.title="Pokémon Origin HeartGold";
+    // Origin HeartGold, Heartfelt Gold, Chaos Purple: no GUIDE (their world isn't HeartGold's), Fairy as type 9.
+    presentation.title=ds_origin()->title;
     frame.availableTabs=dsTabs&~(1<<PD_TAB_GUIDE);
     if(frame.tab==PD_TAB_GUIDE)frame.tab=PD_TAB_PARTY;
     pd_type_fairy9=1;
@@ -212,6 +212,8 @@ void DsCompanionUi::draw_settings(pd_canvas* c){
   pd_ui_options_view(&options,c,&presentation,&battle);options.optionSource=nullptr;
 }
 const std::vector<int>* DsCompanionUi::dex_order() const{
+  // Heartfelt Gold / Chaos Purple: always the National Dex, its numbers to species ids.
+  if(game==DsGame::Johto && ds_origin() && ds_origin()->usEngine && snapshot)return &ds_origin()->dexOrder;
   if(dexArt.regional.empty() || !snapshot)return nullptr;
   if(dexMode>=0)return dexMode?nullptr:&dexArt.regional;
   if(snapshot->nationalDex)return nullptr;

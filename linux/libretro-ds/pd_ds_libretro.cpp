@@ -1566,6 +1566,17 @@ RETRO_API bool retro_load_game(const retro_game_info* info){
       pd_ds::game=pk_nds_field_game_rom(rom.data(),uint32_t(rom.size()));
       log(RETRO_LOG_INFO,"PokeDaisy DS: Origin HeartGold\n");
     }
+    // Heartfelt Gold / Chaos Purple: hg-engine over the US HeartGold, its RAM and battle system; its species, moves,
+    // save offsets and art its own, read from the cart.
+    bool chaos=false;
+    if(pd_ds::companionGame==DsGame::Unsupported&&ds_hg_engine_cart(rom,&chaos)&&
+       ds_hg_engine_read(rom,chaos,pd_ds::originTables)){
+      ds_select_origin(&pd_ds::originTables);
+      pd_ds::companionGame=DsGame::Johto;pd_ds::soulSilver=false;
+      pd_ds::battleStyle=ds_battle_style(pd_ds_data::heartGoldSha1);
+      pd_ds::game=pk_nds_field_game(reinterpret_cast<const char*>(rom.data()+12),rom[30]);
+      log(RETRO_LOG_INFO,"PokeDaisy DS: %s\n",pd_ds::originTables.title);
+    }
     ds_battle_set_base_pp({});
     if(pd_ds::battleStyle && !ds_origin())
       pd_ds::game=pk_nds_field_game(reinterpret_cast<const char*>(rom.data()+12),rom[30]);

@@ -28,13 +28,24 @@ struct DsOrigin {
   std::vector<int> machines;                      // TM01 .. TM92, HM01 .. HM08, TM93 .. TM130
   std::vector<int32_t> wildRates;                 // map header, walking rate, surfing rate, ...
   std::vector<std::array<uint16_t,3>> forms;      // species, form, the form's own species id
+  // Heartfelt Gold and Chaos Purple: hg-engine over the US HeartGold (the US cart's RAM, a save of its own, species ids
+  // that are Dex numbers to ARCEUS and Dex + 50 after, ds_hg_national_species). Origin HeartGold otherwise.
+  bool usEngine=false, chaos=false;
+  int lastSpecies=1440;                          // its last personal record
+  std::vector<uint8_t> iconPalettes;             // usEngine: each species' icon palette
+  std::vector<int> dexOrder;                     // usEngine: National Dex number -> species id (0 first)
+  const char* title="Pokémon Origin HeartGold";
   int form_species(int species,int form)const{
     if(form)for(const auto& f:forms)if(f[0]==species&&f[1]==form)return f[2];
     return species;
   }
 };
 inline constexpr int dsOriginLastNational=1025, dsOriginLastSpecies=1440;
+// Heartfelt Gold / Chaos Purple: No.n's species id.
+inline int ds_hg_national_species(int n){return n<1?0:n<=493?n:n+50;}
 bool ds_origin_cart(const std::vector<uint8_t>& rom);
+// Heartfelt Gold (v1.0.15) or Chaos Purple (the demo): the US HeartGold's header with hg-engine's ARM9 and overlay table.
+bool ds_hg_engine_cart(const std::vector<uint8_t>& rom,bool* chaos);
 // Selects Origin HeartGold (its addresses, its tables) after ds_select_cart; null clears it.
 void ds_select_origin(const DsOrigin* tables);
 const DsOrigin* ds_origin();

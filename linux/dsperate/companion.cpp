@@ -54,12 +54,25 @@ constexpr uint32_t locationOff=0x1324, repelStepsOff=0x6A48+0x65, pokedexOff=0x1
 constexpr uint32_t dexFlagBytes=0xC8, flagsOff=0xEAC+0x170*2, pokegearWordOff=0xBC84+4;
 constexpr int pockets[]={165,50,151,12,40,64,24,30};
 }
+// Heartfelt Gold / Chaos Purple (HeartfeltGold.kt's GEN4_HEARTFELT_GOLD): the US RAM; hg-engine's bag grown moved what
+// follows it (0x1F0, the Pokédex grown 0x3C4 more): its own offsets, the Pokédex's seen bits at +0x400, by species id.
+namespace hgus {
+constexpr uint32_t locationOff=0x1424, repelStepsOff=0x721C+0x65, pokedexOff=0x14A8, seenOff=0x400;
+constexpr uint32_t flagsOff=0xFD4+0x170*2, pokegearWordOff=0xC458+4;
+constexpr int pockets[]={245,92,101,12,40,64,26,30};
+}
+bool ds_hg_engine_cart(const std::vector<uint8_t>& rom,bool* chaos){
+  if(rom.size()<0x60 || std::memcmp(rom.data()+0xC,"IPKE",4)!=0 || rom[0x1E]!=0 || u32(rom.data()+0x2C)!=0x111EF8)return false;
+  const uint32_t overlays=u32(rom.data()+0x54);
+  if(chaos)*chaos=overlays==149*32;
+  return overlays==149*32 || overlays==152*32;
+}
 bool ds_origin_cart(const std::vector<uint8_t>& rom){
   return pk_nds_origin_heartgold(rom.data(),uint32_t(std::min<size_t>(rom.size(),0xffffffffu)))!=0;
 }
 void ds_select_origin(const DsOrigin* tables){
   cart::origin=tables;
-  if(tables){cart::johtoSave=origin::saveDataPtr;cart::johtoField=origin::fieldSystemPtr;}
+  if(tables && !tables->usEngine){cart::johtoSave=origin::saveDataPtr;cart::johtoField=origin::fieldSystemPtr;}
 }
 const DsOrigin* ds_origin(){return cart::origin;}
 DsGame ds_select_cart(const char code[4],int revision,bool* soulSilver){
@@ -85,7 +98,10 @@ DsGame ds_select_cart(const char code[4],int revision,bool* soulSilver){
   return DsGame::Unsupported;
 }
 bool ds_unova_sequel(DsGame game){return game==DsGame::Black2||game==DsGame::White2;}
-int ds_egg_icon(DsGame game){return ds_unova(game)?650:game==DsGame::Johto&&cart::origin?dsOriginLastSpecies+1:pd_ds_data::iconEgg;}
+int ds_egg_icon(DsGame game){
+  if(game==DsGame::Johto&&cart::origin)return cart::origin->usEngine?494:dsOriginLastSpecies+1;
+  return ds_unova(game)?650:pd_ds_data::iconEgg;
+}
 const char* ds_canonical_sha1(const char* digest){
   using namespace pd_ds_data;
   // Decrypted dumps: the secure area differs, the rest of the file (every offset the
@@ -117,7 +133,7 @@ bool decode_mon(const uint8_t* raw,size_t size,DsMon& mon,DsGame game) {
   const char* order=pd_ds_data::orders[((pid>>13)&31)%24];
   auto block=[&](char c){return blocks+32*(std::strchr(order,c)-order);};
   const uint8_t *a=block('A'),*b=block('B'),*c=block('C');
-  int species=u16(a);if(species<1 || species>(unova?649:game==DsGame::Johto&&cart::origin?dsOriginLastSpecies:493))return false;
+  int species=u16(a);if(species<1 || species>(unova?649:game==DsGame::Johto&&cart::origin?cart::origin->lastSpecies:493))return false;
   uint8_t party[100];static_assert(pd_ds_data::monSize-pd_ds_data::boxSize==sizeof party);
   const size_t partySize=record-pd_ds_data::boxSize;
   std::memcpy(party,raw+pd_ds_data::boxSize,partySize);
@@ -180,6 +196,23 @@ template<size_t N> bool read_bag(const Ram& ram,uint32_t addr,const int (&capaci
 void read_dex(const Ram& ram,uint32_t address,DsCompanion& out,unsigned nationalOff){
   using namespace pd_ds_data;
   const bool unova=ds_unova(out.game),hack=out.game==DsGame::Johto&&cart::origin;
+  if(hack && cart::origin->usEngine){
+    // By species id: the caught bits at +4, the seen bits at +0x400; the National Dex always on.
+    const unsigned count=unsigned(cart::origin->lastSpecies);
+    const auto* dex=ram.at(address,hgus::seenOff+count/8+1);
+    if(!dex||u32(dex)!=dexMagic)return;
+    out.dexValid=true;out.nationalDex=true;
+    out.dexSeen.assign(count+1,0);out.dexCaught.assign(count+1,0);
+    for(int n=1;n<=dsOriginLastNational;++n){
+      const unsigned id=unsigned(ds_hg_national_species(n));
+      if(id>count)continue;
+      const auto bit=[&](unsigned base){return (dex[base+(id-1)/8]>>((id-1)%8))&1;};
+      const bool caught=bit(dexCaughtBase),seen=bit(hgus::seenOff)||caught;
+      out.dexSeen[id]=seen;out.dexCaught[id]=caught;
+      out.seenCount+=seen;out.caughtCount+=caught;
+    }
+    return;
+  }
   const unsigned count=unova?649:hack?dsOriginLastNational:dexMax;
   const unsigned stride=unova?0x54:hack?origin::dexFlagBytes:64, caughtBase=unova?8:dexCaughtBase;
   const auto* dex=ram.at(address,unova?caughtBase+5*stride:hack?std::max(4+4*stride+0x50,nationalOff+1):dexSize);
@@ -211,22 +244,26 @@ DsCompanion read_other_companion(const Ram& ram,DsGame game){
   DsCompanion out;
   out.game=game;
   if(game==DsGame::Johto){
-    const bool hack=cart::origin!=nullptr;
-    const uint32_t locationOff=hack?origin::locationOff:johto_locationOff, flagsOff=hack?origin::flagsOff:pg_flagsOff;
+    const bool hack=cart::origin!=nullptr, us=hack&&cart::origin->usEngine;
+    const uint32_t locationOff=us?hgus::locationOff:hack?origin::locationOff:johto_locationOff;
+    const uint32_t flagsOff=us?hgus::flagsOff:hack?origin::flagsOff:pg_flagsOff;
     const uint32_t save=ram.word(cart::johtoSave);
     if(!ram.at(save,locationOff+johto_bodyOff+4))return out;
     const uint32_t body=save+johto_bodyOff;
     const auto* trainer=ram.at(body+johto_trainerOff,johto_kantoBadgesOff+1);
     if(!trainer||!read_party(ram,body+johto_partyOff,out)||
-       !(hack?read_bag(ram,body+johto_bagOff,origin::pockets,out):read_bag(ram,body+johto_bagOff,johtoPockets,out)))return {};
+       !(us?read_bag(ram,body+johto_bagOff,hgus::pockets,out):
+         hack?read_bag(ram,body+johto_bagOff,origin::pockets,out):read_bag(ram,body+johto_bagOff,johtoPockets,out)))return {};
     out.trainer=text(trainer,8);out.money=u32(trainer+20);
     out.badges=trainer[26]|(trainer[johto_kantoBadgesOff]<<8);out.playerGender=trainer[24];
     out.map=ram.word(body+locationOff);
     if(const auto* flags=ram.at(body+flagsOff,gen4FlagBytes))
       out.eventFlags.assign(flags,flags+gen4FlagBytes);
-    if(const auto* steps=ram.at(body+(hack?origin::repelStepsOff:johto_repelStepsOff),1))out.repelSteps=*steps;
-    read_dex(ram,body+(hack?origin::pokedexOff:johto_pokedexOff),out,hack?origin::nationalDexOff:johto_nationalDexOff);
-    const uint32_t gear=ram.word(body+(hack?origin::pokegearWordOff:pg_wordOff));
+    if(const auto* steps=ram.at(body+(us?hgus::repelStepsOff:hack?origin::repelStepsOff:johto_repelStepsOff),1))
+      out.repelSteps=*steps;
+    read_dex(ram,body+(us?hgus::pokedexOff:hack?origin::pokedexOff:johto_pokedexOff),out,
+             hack?origin::nationalDexOff:johto_nationalDexOff);
+    const uint32_t gear=ram.word(body+(us?hgus::pokegearWordOff:hack?origin::pokegearWordOff:pg_wordOff));
     out.mapSkin=std::min(5u,(gear>>18)&127);out.mapUnlock=(gear>>27)&3;
     for(unsigned i=0;i<38;++i){
       const unsigned bit=pg_firstFlag+i;
@@ -425,8 +462,9 @@ DsRepelResult ds_use_repel(const uint8_t* bytes,size_t size,DsGame game,int item
     if(save<0x02000000||save>=0x023e0000)return R::NotAvailable;
     const uint32_t body=save+(johto?johto_bodyOff:bodyOff);
     bag=body+(johto?johto_bagOff:bagOff);
-    counter=body+(johto&&cart::origin?origin::repelStepsOff:johto?johto_repelStepsOff:repelStepsOff);
-    slots=johto?johtoPockets[0]:pockets[0];
+    counter=body+(johto&&cart::origin?(cart::origin->usEngine?hgus::repelStepsOff:origin::repelStepsOff):
+                  johto?johto_repelStepsOff:repelStepsOff);
+    slots=johto&&cart::origin&&cart::origin->usEngine?hgus::pockets[0]:johto?johtoPockets[0]:pockets[0];
   }
   const auto* items=ram.at(bag,slots*4);
   const auto* active=ram.at(counter,1);

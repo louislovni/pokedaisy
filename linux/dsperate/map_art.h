@@ -54,3 +54,5 @@ std::vector<std::vector<uint32_t>> ds_hud_item_icons(const std::vector<uint8_t>&
 std::vector<uint8_t> ds_move_base_pp(const std::vector<uint8_t>& rom, DsGame game);
 // Origin HeartGold's tables from the player's cart (DsOrigin); false when they don't read.
 bool ds_origin_read(const std::vector<uint8_t>& rom,DsOrigin& out);
+// Heartfelt Gold's / Chaos Purple's ([chaos]) tables from the player's cart; false when they don't read.
+bool ds_hg_engine_read(const std::vector<uint8_t>& rom,bool chaos,DsOrigin& out);

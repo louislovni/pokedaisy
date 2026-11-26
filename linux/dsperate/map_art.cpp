@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <string>
 #include <cstdio>
+#include <cctype>
 namespace {
 using Bytes=std::vector<uint8_t>;
 uint16_t u16(const Bytes& b,size_t p){return b.at(p)|(uint16_t(b.at(p+1))<<8);}
@@ -450,8 +451,159 @@ bool ds_origin_read(const std::vector<uint8_t>& rom,DsOrigin& out){
   return out.species.size()>dsOriginLastNational && out.moves.size()>1;
 }
 
+namespace {
+// An uncompressed overlay's file (the ARM9 overlay table at header 0x50, the FAT at 0x48); empty when packed.
+Bytes overlay_file(const Bytes& rom,unsigned id){
+  if(id*32+32>u32(rom,0x54))throw std::runtime_error("missing overlay");
+  const auto entry=slice(rom,u32(rom,0x50)+id*32,32);
+  if(entry[0x1F]&1)throw std::runtime_error("packed overlay");
+  const size_t fat=u32(rom,0x48)+u32(entry,0x18)*8,start=u32(rom,fat),end=u32(rom,fat+4);
+  if(end<start || end-start>(4u<<20))throw std::runtime_error("bad FAT");
+  return slice(rom,start,end-start);
+}
+// A US page's height ("1'04\"": feet, then two digits of inches) and weight ("19.8 lbs."), as dm / hg.
+uint32_t page_height(const std::string& t){
+  const auto q=t.find('\'');
+  if(q==std::string::npos || q==0 || q+2>=t.size())return 0;
+  size_t a=q;while(a>0 && std::isdigit(static_cast<unsigned char>(t[a-1])))--a;
+  if(a==q || !std::isdigit(static_cast<unsigned char>(t[q+1])) || !std::isdigit(static_cast<unsigned char>(t[q+2])))return 0;
+  const int inches=std::stoi(t.substr(a,q-a))*12+(t[q+1]-'0')*10+(t[q+2]-'0');
+  return uint32_t(inches*0.254+0.5);
+}
+uint32_t page_weight(const std::string& t){
+  const auto l=t.find(" lbs");
+  if(l==std::string::npos || l<3 || t[l-2]!='.')return 0;
+  size_t a=l-2;while(a>0 && std::isdigit(static_cast<unsigned char>(t[a-1])))--a;
+  if(a==l-2)return 0;
+  const int tenths=std::stoi(t.substr(a,l-2-a))*10+(t[l-1]-'0');
+  return uint32_t(tenths/2.20462+0.5);
+}
+// Heartfelt Gold / Chaos Purple's DEX (NdsArt.kt's dexHeartfelt), by species id: HeartGold's archives grown (803 the pages,
+// 816 the categories, 814 / 812 the heights and weights as the page prints them), 44-byte personal records, the level-up
+// moves a member a species (Chaos Purple) or one file of 41 pairs a species (Heartfelt), the pictures HeartGold's.
+DsDexArt us_engine_dex_art(const Bytes& rom){
+  DsDexArt art;
+  const auto* o=ds_origin();
+  const int count=o->lastSpecies;
+  try{
+    const auto personal=file(rom,"/a/0/0/2");
+    std::vector<DsDexDetails> details(count+1);
+    for(int n=1;n<=dsOriginLastNational;++n){
+      const int species=ds_hg_national_species(n);
+      if(species>count)continue;
+      try{
+        const auto record=member(personal,species);
+        if(record.size()<0x14)continue;
+        auto& entry=details[species];
+        std::copy_n(record.begin(),6,entry.stats.begin());
+        if(record[0x13]<6)entry.growth=record[0x13];
+      }catch(const std::exception&){}
+    }
+    art.details=std::move(details);
+    const auto messages=file(rom,"/a/0/2/7");
+    auto pages=dex_text(member(messages,803),false,count);
+    auto categories=dex_text(member(messages,816),false,count);
+    std::vector<std::string> heights,weights;
+    try{heights=dex_text(member(messages,814),false,count);weights=dex_text(member(messages,812),false,count);}
+    catch(const std::exception&){}
+    for(size_t i=1;i<art.details.size();++i){
+      if(i<pages.size())art.details[i].description=std::move(pages[i]);
+      if(i<categories.size())art.details[i].category=std::move(categories[i]);
+      if(i<heights.size())art.details[i].heightDm=page_height(heights[i]);
+      if(i<weights.size())art.details[i].weightHg=page_weight(weights[i]);
+    }
+  }catch(const std::exception&){}
+  try{art.pictures=file(rom,"/a/0/0/4",96*1024*1024);}catch(const std::exception&){}
+  try{art.learnsets=file(rom,"/a/0/3/3");}catch(const std::exception&){}
+  try{
+    const auto evo=file(rom,"/a/0/3/4");
+    for(int n=1;n<=dsOriginLastNational;++n){
+      const int species=ds_hg_national_species(n);
+      if(species>count)continue;
+      try{
+        const auto record=member(evo,species);
+        for(size_t i=0;i+6<=record.size();i+=6){
+          const int method=u16(record,i),param=u16(record,i+2),to=u16(record,i+4);
+          // A target with a form in its top bits is a form's: left out.
+          if(method && to>0 && !(to>>11) && to<=count && to!=species)art.evolutions.push_back({species,to,method,param});
+        }
+      }catch(const std::exception&){}
+    }
+  }catch(const std::exception&){}
+  return art;
+}
+}
+
+bool ds_hg_engine_read(const std::vector<uint8_t>& rom,bool chaos,DsOrigin& out){
+  // NdsArt.kt's readHeartfelt and readNames (NAMES_HEARTGOLD: HeartGold's banks, grown: 237 species, 750 moves, 222
+  // items); HeartfeltGold.kt / ChaosPurple.kt for where its tables sit.
+  out={};
+  out.usEngine=true;out.chaos=chaos;
+  out.lastSpecies=chaos?1392:1534;
+  out.title=chaos?"Pokémon Chaos Purple":"Pokémon Heartfelt Gold";
+  try{
+    const auto messages=file(rom,"/a/0/2/7");
+    out.species=dex_text(member(messages,237),false,8000);
+    out.moves=dex_text(member(messages,750),false,8000);
+    out.items=dex_text(member(messages,222),false,8000);
+    const auto personal=file(rom,"/a/0/0/2");
+    out.speciesTypes.assign(out.lastSpecies+1,{-1,-1});
+    for(int id=1;id<=out.lastSpecies;++id){
+      try{
+        const auto p=member(personal,id);
+        if(p.size()>=8)out.speciesTypes[id]={int8_t(p[6]),int8_t(p[7])};
+      }catch(const std::exception&){}
+    }
+    // /a/0/1/1: 16 bytes a move, power at 3, type at 4, PP at 6.
+    const auto moves=file(rom,"/a/0/1/1");
+    const unsigned count=u16(moves,u16(moves,12)+8);
+    out.moveMeta.assign(count,{-1,0});out.basePp.assign(count,0);
+    for(unsigned id=1;id<count;++id){
+      const auto m=member(moves,id);
+      if(m.size()<7)continue;
+      out.moveMeta[id]={int16_t(m[4]),int16_t(m[3])};out.basePp[id]=m[6];
+    }
+    if(count<=33 || out.basePp[1]!=35 || out.basePp[33]!=35)out.basePp.clear();
+    // The icons' palettes: Chaos Purple's a byte a species at overlay 129's start, Heartfelt's member 9 of /a/0/2/8.
+    try{
+      auto palettes=chaos?overlay_file(rom,129):member(file(rom,"/a/0/2/8"),9);
+      if(palettes.size()>size_t(out.lastSpecies))palettes.resize(out.lastSpecies+1);
+      out.iconPalettes=std::move(palettes);
+    }catch(const std::exception&){}
+    out.dexOrder.assign(dsOriginLastNational+1,0);
+    for(int n=1;n<=dsOriginLastNational;++n)out.dexOrder[n]=ds_hg_national_species(n);
+    // Each map header's encounter bank (0xFF none) into a/0/3/7: its walking and surfing rates. Chaos Purple's headers
+    // are hg-engine's own NARC (/a/0/5/0), Heartfelt's the ARM9's table (0x020F6BE0, 540).
+    try{
+      Bytes headers;
+      if(chaos){
+        const auto narc=file(rom,"/a/0/5/0");
+        const unsigned maps=u16(narc,u16(narc,12)+8);
+        for(unsigned map=0;map<maps;++map){
+          Bytes h(24,0xff);
+          try{const auto m=member(narc,map);if(m.size()>=24)std::copy_n(m.begin(),24,h.begin());}catch(const std::exception&){}
+          headers.insert(headers.end(),h.begin(),h.end());
+        }
+      }else headers=slice(rom,0x4000+0xF6BE0,540*24);
+      const auto encounters=file(rom,"/a/0/3/7");
+      for(size_t map=0;map<headers.size()/24;++map){
+        const int bank=headers[map*24];
+        if(bank==0xff)continue;
+        try{
+          const auto e=member(encounters,bank);
+          if(e.size()>=2){out.wildRates.push_back(int32_t(map));out.wildRates.push_back(e[0]);out.wildRates.push_back(e[1]);}
+        }catch(const std::exception&){}
+      }
+    }catch(const std::exception&){}
+  }catch(const std::exception& e){
+    std::fprintf(stderr,"%s tables: %s\n",out.title,e.what());
+    return false;
+  }
+  return out.species.size()>size_t(dsOriginLastNational) && out.moves.size()>1;
+}
+
 DsDexArt ds_dex_art(const std::vector<uint8_t>& rom,DsGame game){
-  if(origin_active(game))return origin_dex_art(rom);
+  if(origin_active(game))return ds_origin()->usEngine?us_engine_dex_art(rom):origin_dex_art(rom);
   DsDexArt art;
   if(game==DsGame::Unsupported)return art;
   const bool unova=ds_unova(game),johto=game==DsGame::Johto;
@@ -542,6 +694,19 @@ std::vector<DsDexEvolution> ds_dex_evolutions(const DsDexArt& art,int species){
 std::vector<DsDexMove> ds_level_moves(const DsDexArt& art,DsGame game,int species){
   std::vector<DsDexMove> moves;
   const bool unova=ds_unova(game);
+  if(origin_active(game) && ds_origin()->usEngine){
+    // { u16 move, u16 level } to 0xFFFF: Chaos Purple's a member a species, Heartfelt's 41 a species in member 0.
+    if(species<=0 || species>ds_origin()->lastSpecies)return moves;
+    try{
+      const bool chaos=ds_origin()->chaos;
+      const auto record=chaos?member(art.learnsets,species):slice(member(art.learnsets,0),size_t(species)*164,164);
+      for(size_t i=0;i+4<=record.size() && u16(record,i)!=0xffff;i+=4){
+        const int move=u16(record,i),level=u16(record,i+2);
+        if(move && level<=100)moves.push_back({level,move});
+      }
+    }catch(const std::exception&){}
+    return moves;
+  }
   if(origin_active(game)){
     if(species<=0 || species>dsOriginLastNational)return moves;
     try{
@@ -570,7 +735,8 @@ std::vector<DsDexMove> ds_level_moves(const DsDexArt& art,DsGame game,int specie
 DsDexPage ds_dex_page(const DsDexArt& art,DsGame game,int species){
   DsDexPage page;
   const bool unova=ds_unova(game);
-  if(origin_active(game)){
+  const bool usEngine=origin_active(game) && ds_origin()->usEngine;
+  if(origin_active(game) && !usEngine){
     if(species<=0 || species>dsOriginLastNational)return page;
     if(size_t(species)<art.details.size() && art.details[species].hasMachines){
       const auto& bits=art.details[species].machineBits;
@@ -600,8 +766,8 @@ DsDexPage ds_dex_page(const DsDexArt& art,DsGame game,int species){
     }catch(const std::exception&){page.sprite.clear();page.side=0;}
     return page;
   }
-  if(species<=0 || species>(unova?649:493))return page;
-  if(size_t(species)<art.details.size() && art.details[species].hasMachines){
+  if(species<=0 || species>(unova?649:usEngine?ds_origin()->lastSpecies:493))return page;
+  if(!usEngine && size_t(species)<art.details.size() && art.details[species].hasMachines){
     const auto& bits=art.details[species].machineBits;
     const int* moves=unova?pd_ds_data::tmMovesBlack:
       game==DsGame::Johto?pd_ds_data::tmMovesHeartGold:pd_ds_data::tmMovesPlatinum;
@@ -657,6 +823,31 @@ DsDexPage ds_dex_page(const DsDexArt& art,DsGame game,int species){
 
 std::vector<std::vector<uint32_t>> ds_party_icons(const std::vector<uint8_t>& rom,DsGame game){
   using namespace pd_ds_data;
+  if(origin_active(game) && ds_origin()->usEngine){
+    // NdsArt.kt's extractHeartfelt: /a/0/2/0, 7 + species each icon (the egg's 494), member 0 the palettes, each
+    // species' palette from its own table.
+    try{
+      const auto narc=file(rom,"/a/0/2/0");
+      const auto pal=palette(member(narc,0));
+      const auto& banks=ds_origin()->iconPalettes;
+      const int last=ds_origin()->lastSpecies;
+      std::vector<std::vector<uint32_t>> icons(last+1);
+      for(int id=1;id<=last && size_t(id)<banks.size();++id){
+        try{
+          const auto graphic=member(narc,7+id);
+          const auto tile=slice(graphic,block(graphic,"RAHC")+32,512);
+          const unsigned bank=banks[id];
+          if((bank+1)*16>pal.size())continue;
+          auto& icon=icons[id];icon.resize(32*32,0);
+          for(int y=0;y<32;y++)for(int x=0;x<32;x++){
+            const int v=pixel(tile,(y/8)*4+x/8,x%8,y%8);
+            if(v)icon[y*32+x]=pal.at(bank*16+v);
+          }
+        }catch(const std::exception&){}
+      }
+      return icons;
+    }catch(const std::exception& e){std::fprintf(stderr,"DS party art: %s\n",e.what());return {};}
+  }
   if(origin_active(game)){
     // NdsArt.kt's extractOrigin: /data/pokeicon.narc, 7 + 2 x species / form id each icon (the egg's 0xB49), in the
     // palette its ARM9's table gives.
@@ -717,7 +908,7 @@ std::vector<std::vector<uint32_t>> ds_hud_item_icons(const std::vector<uint8_t>&
   const auto range=[](const auto& a){return std::pair{std::begin(a),std::end(a)};};
   const auto [first,last]=ds_unova_sequel(game)?range(sequelHudItemArt):ds_unova(game)?range(unovaHudItemArt):
     game==DsGame::Johto?range(johtoHudItemArt):range(platinumHudItemArt);
-  const bool hack=origin_active(game);
+  const bool hack=origin_active(game) && !ds_origin()->usEngine; // Origin's a/0/1/8 has no index table
   try {
     const auto narc=file(rom,ds_unova(game)?"/a/0/2/5":game==DsGame::Johto?"/a/0/1/8":"/itemtool/itemdata/item_icon.narc");
     const auto maxId=std::max_element(first,last,[](const auto& a,const auto& b){return a[0]<b[0];});
