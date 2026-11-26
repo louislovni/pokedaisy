@@ -2943,7 +2943,10 @@ static void amb_after_run(void) {
   }
   // The map's colours: in on the field outdoors (eased, mostly while a door's or a menu's fade comes back), off at once
   // elsewhere (a menu's own green windows are BG palettes too). A new season on the field fades the old one out first.
-  const bool colours = season >= 0 && field;
+  // In a battle outdoors its backdrop takes the season too (its grass, trees and the ground under the Pokémon).
+  const bool battleOut = haveGame && PD_BE_IS_GBA() && wideSupported && snap.valid && snap.inBattle && !COMPANION_OVER &&
+                         !quickOpen && amb_outdoors();
+  const bool colours = season >= 0 && (field || battleOut);
   static bool changing; // a season changing on screen: slowly out and in (about a second), not a door's quick fade
   if (!colours) {
     ambSeasonK = 0;
