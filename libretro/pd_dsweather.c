@@ -540,34 +540,49 @@ void dsw_weather(int kind, const struct dsw_target *t) {
 /* ---- the seasons ---- */
 /* Our own drawings (the DS games have no such particles): a petal turning over, a leaf tumbling. */
 static const struct doodle PETAL[3] = {
-    {5, 3, ".aab."
+    {7, 5, "..aab.."
+           ".aaabb."
+           "aaaabbb"
+           ".aabbb."
+           "..bb..."},
+    {7, 4, ".aaab.."
+           "aaaabbb"
+           ".aabbbb"
+           "...bb.."},
+    {5, 4, ".aab."
            "aaabb"
-           ".abb."},
-    {4, 2, "aab."
-           ".abb"},
-    {3, 2, "ab."
-           ".bb"},
+           ".abbb"
+           "..b.."},
 };
 static const struct doodle LEAF[4] = {
-    {6, 5, "....c."
-           "..aab."
-           ".aaab."
-           "aaab.."
-           ".bb..."},
-    {5, 5, "...c."
-           "..ab."
-           ".aab."
-           "aab.."
-           "ab..."},
-    {3, 5, ".c."
-           ".a."
-           "aa."
-           "ab."
-           ".b."},
-    {6, 4, "c....."
-           ".aaab."
-           "..aabb"
-           "...b.."},
+    {9, 7, ".......c."
+           ".....aac."
+           "...aaaab."
+           "..aaaaab."
+           ".aaaaabb."
+           "aaaabbb.."
+           ".bbbb...."},
+    {7, 8, ".....c."
+           "....ac."
+           "...aab."
+           "..aaab."
+           ".aaaab."
+           "aaaabb."
+           "aabb..."
+           ".b....."},
+    {4, 8, "..c."
+           ".ac."
+           ".aa."
+           "aaa."
+           "aab."
+           "aab."
+           ".ab."
+           ".b.."},
+    {9, 5, "c........"
+           ".caaaab.."
+           "..aaaaabb"
+           "...aabbb."
+           "....bb..."},
 };
 static const struct doodle FLAKE = {3, 3, ".a."
                                           "aba"
@@ -597,7 +612,7 @@ void dsw_season(int season, const struct dsw_target *t) {
   float w, h;
   area(t, &w, &h);
   frame++;
-  int n = season == SEASON_WINTER ? 26 : season == SEASON_SUMMER ? 0 : 22;
+  int n = season == SEASON_WINTER ? 26 : season == SEASON_SUMMER ? 0 : 32;
   n = (int)(n * w * h / (240.0f * 160.0f));
   if (season != seasonShown) {
     seasonShown = season;
