@@ -379,6 +379,33 @@ void emit(const uint32_t* px,bool field3D){
       thumb[ty*TW+tx]=((r/64)<<16)|((g/64)<<8)|(b/64);
     }
   }
+  // Above the screen, where the game has drawn nothing (HeartGold keeps only the map blocks round the player loaded: past
+  // them the slice is empty), each column's last drawn colour fades off into the dark over FOG DS rows instead of the
+  // picture stopping at a hard black edge (a player's report, Origin HeartGold's Pallet Town upright).
+  constexpr int FOG=28;
+  static int16_t topEdge[(256+2*MAX_X)];   // the topmost drawn DS row reached from the screen without a gap, per column
+  static uint32_t topColour[(256+2*MAX_X)];
+  const int columns=int(W/2);
+  if(field3D&&!mx&&myT>0&&columns<=int(std::size(topEdge))){
+    for(int x=0;x<columns;++x){
+      int y=-1;
+      while(y>=-myT&&drawn(at(2,x,y)))--y;
+      topEdge[x]=int16_t(y+1);
+      topColour[x]=y+1<0?shade(at(2,x,y+1),mb):0;
+    }
+    // Softened across a few columns: one column's own colour faded alone streaks.
+    static uint32_t soft[(256+2*MAX_X)];
+    for(int x=0;x<columns;++x){
+      unsigned r=0,g=0,b=0,n=0;
+      for(int d=-4;d<=4;++d){
+        const int c=x+d;
+        if(c<0||c>=columns||!topColour[c])continue;
+        r+=(topColour[c]>>16)&255;g+=(topColour[c]>>8)&255;b+=topColour[c]&255;++n;
+      }
+      soft[x]=n&&topColour[x]?((r/n)<<16)|((g/n)<<8)|(b/n):0;
+    }
+    std::memcpy(topColour,soft,sizeof(uint32_t)*columns);
+  }
   for(unsigned Y=0;Y<H;++Y){
     uint32_t* row=out+Y*W;
     const int sy=int(Y)-int(Y0);   // stage row
@@ -415,6 +442,14 @@ void emit(const uint32_t* px,bool field3D){
       for(unsigned X=0;X<W;++X){
         const uint32_t c=at(k,int(X/2),y);
         uint32_t o=drawn(c)?shade(c,mb):0;
+        if(k==2&&!drawn(c)&&int(X/2)<columns&&y<topEdge[X/2]&&topColour[X/2]){
+          const int gone=topEdge[X/2]-y;   // rows past the last drawn one
+          if(gone<FOG){
+            const uint32_t e=topColour[X/2];
+            const unsigned g=256*(FOG-gone)/FOG;
+            o=((((e>>16)&255)*g>>8)<<16)|((((e>>8)&255)*g>>8)<<8)|((e&255)*g>>8);
+          }
+        }
         if(f<256)o=((((o>>16)&255)*f>>8)<<16)|((((o>>8)&255)*f>>8)<<8)|((o&255)*f>>8);
         row[X]=o;
       }

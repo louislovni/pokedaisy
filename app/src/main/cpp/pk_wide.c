@@ -5311,11 +5311,12 @@ int pk_wide_lights(int x0, int y0, int x1, int y1, int* out, int max) {
     useLine(PK_WIDE_H / 2);
     int ox = lightCam.cx + signed9((io(0x14) & 0x1FF) - lightCam.href);
     int oy = lightCam.cy + signed9((io(0x16) & 0x1FF) - lightCam.vref);
-    // The doors in view (and a little past it, so a light comes in before its door).
-    int doors[32][2], nd = 0;
-    int tx0 = (x0 + ox - 16) >> 4, tx1 = (x1 + ox + 16) >> 4, ty0 = (y0 + oy - 16) >> 4, ty1 = (y1 + oy + 16) >> 4;
-    for (int ty = ty0; ty <= ty1 && nd < 32; ty++)
-        for (int tx = tx0; tx <= tx1 && nd < 32; tx++) {
+    // The doors in view and past it by as far as their windows reach (4 metatiles either side, 3 rows up), so a building
+    // whose door is off screen still lights the windows that are on it (Capsule, Pallet Town's houses at the picture's edge).
+    int doors[48][2], nd = 0;
+    int tx0 = (x0 + ox - 16 - 64) >> 4, tx1 = (x1 + ox + 16 + 64) >> 4, ty0 = (y0 + oy - 16) >> 4, ty1 = (y1 + oy + 16 + 48) >> 4;
+    for (int ty = ty0; ty <= ty1 && nd < 48; ty++)
+        for (int tx = tx0; tx <= tx1 && nd < 48; tx++) {
             int conn;
             int mid = blockIn(s, tx, ty, &conn, false);
             if (conn >= 0) continue;   // a connected map's: its own tilesets
