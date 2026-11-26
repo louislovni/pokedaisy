@@ -4120,6 +4120,19 @@ Its manual page is a draft, `docs/manual-drafts/coop.md` (its top note says what
 - **Message types** (`CoopWire`): 0x0001-0x00FF the link's own (HELLO, PAIR_ACCEPT, PAIR_DENY, BYE); 0x0100-0x01FF plan 3,
   0x0200-0x02FF plan 4, 0x0300-0x03FF plan 5; others are dropped on receipt.
 
+## FF sound (Capsule's GBA core and the Linux / Windows host)
+
+In fast-forward a Gen 3 game's music and sound effects play at 1x (`libretro/pd_ffsound.c`). The m4a engine runs off the
+VBlank interrupt, so a second mGBA core loaded from the live game's state, its main loop parked on a `b .` with VBlank's
+interrupt on (the app's `pkRenderPark`), plays on by itself; the frontend runs it once per frame of real time
+(`retro_pd_ff_audio`) after the fast frames, which run muted (`retro_pd_ff_sound(on)` before each batch). The live game
+tells the copy what changed: the BGM player's header / playing / paused bits (the chain's tail) changing makes a new copy;
+another player's MPlayStart (its header changed, or its clock went back) is replayed on the copy with `pk_call` of the
+ROM's MPlayStart (the first `bl` of `m4aSongNumStart`, found by the Android app's `M4aSongs` signatures), a cry's
+`PokemonCrySong` (built in RAM, 0x34 bytes) copied over first. A ROM without those signatures keeps the old sound
+(Capsule: silent, the host: sped up). Checked headless: FireRed's Pallet Town music under 4x matches the 1x recording
+(0.98 correlation, 4 frames ahead), the START menu's sound and an Emerald wild battle's music and cry replayed.
+
 ## DS weather and seasons (Capsule's GBA core)
 
 Capsule's libretro GBA core (`libretro/pd_dsweather.c`, glue in `pd_libretro.c`'s DS WEATHER section) draws two things over a GBA

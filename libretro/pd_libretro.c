@@ -684,6 +684,47 @@ static const struct gb_field *gbf;
 static int gbTake;
 static bool gbWildHeld;
 static size_t romLen;
+/* FF SOUND (pd_ffsound.c): the frontend's fast-forward heard at 1x - music and sound effects from a parked copy of the game.
+ * Opened the first time FF asks for it (a ROM scan), closed with the game. */
+#ifndef PD_ARMGBA
+#include "pd_ffsound.h"
+static int ffsState; /* 0 not tried, 1 ready, -1 no m4a engine / not a GBA game */
+static bool ffsOn;
+static void ffs_game_changed(void) {
+  ffs_close();
+  ffsState = 0;
+  ffsOn = false;
+}
+/** The frontend, before each batch of frames: whether FF is running (its sound wanted from retro_pd_ff_audio). Returns
+ * whether this game can have it (false: keep the frontend's own FF sound, or none). */
+RETRO_API bool retro_pd_ff_sound(bool on) {
+  if (!haveGame || !PD_BE_IS_GBA() || !romData) {
+    ffsOn = false;
+    return false;
+  }
+  if (on && !ffsState)
+    ffsState = ffs_open(romData, romLen) ? 1 : -1;
+  if (!on && ffsOn)
+    ffs_reset();
+  ffsOn = on && ffsState == 1;
+  return ffsState == 1;
+}
+/** One frame of real time's FF sound (stereo, the core's own rate): the frames written into [out], 0 = none. */
+RETRO_API int retro_pd_ff_audio(int16_t *out, int maxFrames) {
+  return ffsOn && ffsState == 1 ? ffs_play(core, out, maxFrames) : 0;
+}
+#define FFS_JUMP() ffs_reset()
+#define FFS_FRAME()                                                                                                    \
+  do {                                                                                                                 \
+    if (ffsOn)                                                                                                         \
+      ffs_live_frame(core);                                                                                            \
+  } while (0)
+#define FFS_GAME_CHANGED() ffs_game_changed()
+#else
+#define FFS_JUMP() ((void)0)
+#define FFS_FRAME() ((void)0)
+#define FFS_GAME_CHANGED() ((void)0)
+#endif
 static bool polishedActions;
 static struct pd_binput polishedInput;
 
@@ -1283,6 +1324,7 @@ RETRO_API bool retro_load_game(const struct retro_game_info *g) {
     pk_field_wild(wildSwitch, settings.wildOff);
   pk_rest_reset();
   fieldFlags = 0;
+  FFS_GAME_CHANGED();
   romData = rom;
   romLen = len;
   bool gba = PD_BE_IS_GBA();
@@ -1407,11 +1449,14 @@ RETRO_API bool retro_unserialize(const void *d, size_t n) {
 #endif
   if (r && haveGame)
     layer_jump();
+  if (r)
+    FFS_JUMP();
   return r;
 }
 
 RETRO_API void retro_reset(void) {
   mgba_retro_reset();
+  FFS_JUMP();
   if (haveGame)
     layer_jump();
 }
@@ -1423,6 +1468,7 @@ RETRO_API void retro_unload_game(void) {
   day_night_reset();
   coop_game_changed();
 #endif
+  FFS_GAME_CHANGED();
   pk_flight_configure(NULL, 0);
   pd_flight_area_end();
   pk_flight_set_area(NULL, 0);
@@ -2167,6 +2213,7 @@ RETRO_API void retro_run(void) {
                       ? 1u << B : 0;
     PF_T(pa);
     mgba_retro_run();
+    FFS_FRAME();
     cb_after_frame();
     bs_after_run();
     amb_after_run();

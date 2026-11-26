@@ -2377,7 +2377,19 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     ffNow = ff;
     ffSpeedNow = runs;
     rewindingNow = rewinding;
-    audioKeepEvery = (unsigned)runs;
+    // FF heard at 1x (a Gen 3 game, Capsule's build: retro_pd_ff_sound): the fast frames muted, then one frame of real
+    // time's music and sounds from the core's parked copy of the game. Else every Nth sample: sped up.
+    static void *ffDl;
+    static bool (*ffSound)(bool);
+    static int (*ffAudio)(int16_t *, int);
+    if (ffDl != core.dl) {
+      ffDl = core.dl;
+      ffSound = (bool (*)(bool))dlsym(core.dl, "retro_pd_ff_sound");
+      ffAudio = (int (*)(int16_t *, int))dlsym(core.dl, "retro_pd_ff_audio");
+    }
+    const bool steady = ffSound && ffAudio && ffSound(ff && !rewinding);
+    const bool steadyFf = steady && ff && !rewinding;
+    audioKeepEvery = steadyFf ? 1 : (unsigned)runs;
     gameKeys = joypad((held & ~hotkeyMask & ~((1u << MENU) | (1u << FFKEY) | (1u << RWKEY))) | modifierPulse);
     uint64_t t = SDL_GetPerformanceCounter();
     if (rewinding) {
@@ -2387,6 +2399,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
       else
         rewinding = false;
     } else {
+      muted = steadyFf;
       for (int i = 0; i < runs && running; i++) {
         core.run();
 #ifdef CAPSULE_COOP
@@ -2399,6 +2412,13 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
         if (hostSet.rewind && !(++rewindTick & 1))
           rewind_push();
       }
+    }
+    if (steadyFf) {
+      muted = false;
+      static int16_t ffBuf[2048 * 2];
+      const int got = ffAudio(ffBuf, 2048);
+      if (got > 0)
+        audio_batch(ffBuf, (size_t)got);
     }
     emuMs = (double)(SDL_GetPerformanceCounter() - t) * 1000.0 / SDL_GetPerformanceFrequency() / runs;
     if (++frames % 120 == 0 && sram_write(sav, &sramCopy, true) && pure)
