@@ -39,4 +39,8 @@ void dsw_reset(void);
  * (0 off; 7 and 8, by play time and by area, are the core's). */
 int dsw_season_now(int mode);
 
+/* FOLLOWER: HeartGold / SoulSilver's following Pokémon [national] (its female look where it has one, its shiny colours)
+ * from the cart at [path], as pk_follower_set takes it: six 32 x 32 frames in GBA tile order and a 16-colour palette. */
+bool dsw_follower(const char *path, int national, bool female, bool shiny, uint8_t frames[3072], uint8_t pal[32]);
+
 #endif

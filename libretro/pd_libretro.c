@@ -2878,6 +2878,41 @@ RETRO_API void retro_pd_ambience(int dsWeather, int seasons) {
   ambSeasons = seasons >= 1 && seasons <= 8 ? seasons : 0;
 }
 
+/* FOLLOWER: the cart HeartGold / SoulSilver's following Pokémon come from (empty: off), and which one is loaded. */
+static char followCart[1024];
+static int followKey = -1;
+static bool followShown;
+static unsigned followFrames;
+RETRO_API void retro_pd_follower(const char *ndsPath) {
+  snprintf(followCart, sizeof followCart, "%s", ndsPath ? ndsPath : "");
+  followKey = -1;
+}
+/* After each frame: the party's lead (the first that isn't an egg) to the renderer when it changed, shown on the field. */
+static void follow_after_run(void) {
+  int key = 0;
+  const struct pd_mon *lead = NULL;
+  if (followCart[0] && haveGame && PD_BE_IS_GBA() && snap.valid)
+    for (int i = 0; i < snap.partyCount && i < PD_PARTY_SIZE; i++)
+      if (!snap.party[i].egg && snap.party[i].species > 0) {
+        lead = &snap.party[i];
+        break;
+      }
+  int national = lead ? pd_dex_national(&game, lead->species) : 0;
+  if (lead && national > 0 && national <= 493)
+    key = national | (lead->gender == PD_GENDER_FEMALE) << 12 | lead->shiny << 13;
+  if (key != followKey && (key || !snap.valid || !followCart[0])) {
+    static uint8_t frames[3072], pal[32];
+    bool ok = key && dsw_follower(followCart, national, lead->gender == PD_GENDER_FEMALE, lead->shiny, frames, pal);
+    pk_follower_set(ok ? frames : NULL, ok ? pal : NULL);
+    followKey = key;
+  }
+  const bool show = followKey > 0 && wideSupported && snap.valid && !snap.inBattle && !(fieldFlags & PK_FIELD_BATTLE);
+  // Also every second while shown: the renderer's hook comes back with a reset.
+  if (show != followShown || (show && ++followFrames % 60 == 0)) {
+    pk_follower_show(core, show);
+    followShown = show;
+  }
+}
 static bool amb_outdoors(void) {
   const int type = snap.posOk ? snap.mapType : -1;
   return type < 0 || type == 1 || type == 2 || type == 3 || type == 6;
@@ -2991,6 +3026,7 @@ static void amb_after_run(void) {
     dsw_reset();
     ambPlayFrames = 0;
   }
+  follow_after_run();
 }
 static void amb_plot(int x, int y, uint32_t rgb, int a) {
   if (x < 0 || y < 0 || x >= CW || y >= CH)
@@ -3031,6 +3067,7 @@ static void amb_draw(void) {
 #else
 RETRO_API void retro_pd_weather_cart(const char *ndsPath) { (void)ndsPath; }
 RETRO_API void retro_pd_ambience(int dsWeather, int seasons) { (void)dsWeather; (void)seasons; }
+RETRO_API void retro_pd_follower(const char *ndsPath) { (void)ndsPath; }
 static int ambKind = -1, ambSeasonDrawn = -1;
 static void amb_after_run(void) {}
 static void amb_draw(void) {}

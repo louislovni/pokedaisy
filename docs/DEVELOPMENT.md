@@ -4139,7 +4139,11 @@ when it's there). `retro_pd_weather_cart` / `retro_pd_ambience(dsWeather, season
 season always, 7 a new one every 20 minutes of play - the TRAINER CARD's play time where it's read, else the field frames
 since the game started - 8 by area: the map section's id hashed, so neighbours differ); a season changing on screen fades out
 and in over about a second, and a battle outdoors takes the season's colours on its backdrop too; `retro_pd_scene`'s values 8 / 9 tell the frontend the core drew the weather / a season, so its own
-weather layer keeps only its colours. Headless: the core over a French Emerald save on Route 120 (7, 15)'s rain trigger and
+weather layer keeps only its colours. **FOLLOWER** (`retro_pd_follower`, `dsw_follower`): the party's first Pokémon that isn't an egg walks behind the
+player through pk_wide's FOLLOWER (`pk_follower_set` / `_show`), its frames HeartGold / SoulSilver's following Pokémon from
+the same cart: `a/0/8/1` (mmodel.narc) member 297 + follow_mon.c's `sModelIndexLUT[national]` (+1 for a female where
+`sFemaleFlagLUT` says so; both tables written out in pd_dsweather.c, numbers not art), an NSBTX of eight 32 x 32 4bpp
+textures (0 / 1 away, 2 / 3 towards, 4 / 5 to the left) and two palettes (normal, shiny). Headless: the core over a French Emerald save on Route 120 (7, 15)'s rain trigger and
 Route 111's desert.
 
 ## Releasing
