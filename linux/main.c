@@ -9,6 +9,7 @@
 #include "display_filter.h"
 #include "pd_canvas.h"
 #include "pd_menu.h"
+#include "pd_tr.h"
 #include "pd_style.h"
 #include "pk_patch.h"
 #ifdef CAPSULE_COOP
@@ -129,49 +130,75 @@ static int face(int k) {
 static unsigned held, pressed;
 static bool inputReset;
 static unsigned repeatAt[NKEYS];
+/* The keyboard: a key per action, set on the menu's KEYS page (host.ini kb_*, SDL's key names). F1 is fixed: it opens
+ * that page (from the game or the game list), so a player who lost a key can always see and fix them. */
+struct kb_bind {
+  int action;
+  SDL_Keycode key, def;
+  const char *id, *label; // label: English, through pd_tr
+};
+static struct kb_bind kbBinds[] = {
+    {UP, SDLK_UP, SDLK_UP, "up", "D-PAD UP"},
+    {DOWN, SDLK_DOWN, SDLK_DOWN, "down", "D-PAD DOWN"},
+    {LEFT, SDLK_LEFT, SDLK_LEFT, "left", "D-PAD LEFT"},
+    {RIGHT, SDLK_RIGHT, SDLK_RIGHT, "right", "D-PAD RIGHT"},
+    {A, SDLK_z, SDLK_z, "a", "A (CONFIRM, TALK)"},
+    {B, SDLK_x, SDLK_x, "b", "B (BACK, RUN)"},
+    {START, SDLK_RETURN, SDLK_RETURN, "start", "START (GAME MENU)"},
+    {SELECT, SDLK_BACKSPACE, SDLK_BACKSPACE, "select", "SELECT"},
+    {L, SDLK_q, SDLK_q, "l", "L"},
+    {R, SDLK_e, SDLK_e, "r", "R"},
+    {Y, SDLK_f, SDLK_f, "y", "Y (QUICK MENU)"},
+    {X, SDLK_TAB, SDLK_TAB, "x", "X (COMPANION)"},
+    {L2, SDLK_1, SDLK_1, "l2", "L2"},
+    {R2, SDLK_2, SDLK_2, "r2", "R2"},
+    {FFKEY, SDLK_SPACE, SDLK_SPACE, "ff", "FAST FORWARD (HOLD)"},
+    {RWKEY, SDLK_r, SDLK_r, "rewind", "REWIND (HOLD)"},
+    {SAVEKEY, SDLK_F2, SDLK_F2, "save", "SAVE STATE"},
+    {LOADKEY, SDLK_F4, SDLK_F4, "load", "LOAD STATE"},
+    {MENU, SDLK_ESCAPE, SDLK_ESCAPE, "menu", "PC MENU"},
+};
+#define KB_BINDS ((int)(sizeof kbBinds / sizeof kbBinds[0]))
+static int kbCapture = -1;   // the KEYS page's row waiting for a key (a kbBinds index), -1 none
+static bool kbCaptured;      // a key was just taken (the page saves host.ini)
+static bool keysOpen;        // F1: the KEYS page asked for (the game's loop or the game list opens it)
 static int keyboard(SDL_Keycode k) {
+  for (int i = 0; i < KB_BINDS; i++)
+    if (kbBinds[i].key == k)
+      return kbBinds[i].action;
+  return -1;
+}
+/* A key's name as the KEYS page shows it (SDL's English names, the common ones in the player's words). */
+static const char *kb_key_label(SDL_Keycode k) {
   switch (k) {
-  case SDLK_z:
-    return A;
-  case SDLK_x:
-    return B;
-  case SDLK_BACKSPACE:
-    return SELECT;
-  case SDLK_RETURN:
-    return START;
-  case SDLK_RIGHT:
-    return RIGHT;
-  case SDLK_LEFT:
-    return LEFT;
-  case SDLK_UP:
-    return UP;
-  case SDLK_DOWN:
-    return DOWN;
-  case SDLK_e:
-    return R;
-  case SDLK_q:
-    return L;
-  case SDLK_TAB:
-    return X;
-  case SDLK_f:
-    return Y;
-  case SDLK_1:
-    return L2;
-  case SDLK_2:
-    return R2;
-  case SDLK_ESCAPE:
-    return MENU;
-  case SDLK_SPACE:
-    return FFKEY;
-  case SDLK_r:
-    return RWKEY;
-  case SDLK_F2:
-    return SAVEKEY;
-  case SDLK_F4:
-    return LOADKEY;
-  default:
-    return -1;
+  case SDLK_UP: return pd_tr("UP ARROW");
+  case SDLK_DOWN: return pd_tr("DOWN ARROW");
+  case SDLK_LEFT: return pd_tr("LEFT ARROW");
+  case SDLK_RIGHT: return pd_tr("RIGHT ARROW");
+  case SDLK_RETURN: return pd_tr("ENTER");
+  case SDLK_BACKSPACE: return pd_tr("BACKSPACE");
+  case SDLK_SPACE: return pd_tr("SPACE");
+  case SDLK_ESCAPE: return pd_tr("ESC");
+  case SDLK_TAB: return "TAB";
+  case SDLK_LSHIFT: case SDLK_RSHIFT: return pd_tr("SHIFT");
+  case SDLK_LCTRL: case SDLK_RCTRL: return "CTRL";
+  case SDLK_UNKNOWN: return pd_tr("NONE");
+  default: {
+    static char up[32];
+    snprintf(up, sizeof up, "%s", SDL_GetKeyName(k));
+    for (char *c = up; *c; c++)
+      if (*c >= 'a' && *c <= 'z')
+        *c -= 32;
+    return up;
   }
+  }
+}
+/* The KEYS page's next key goes to row [i]; a key another action had trades places with this one's. */
+static void kb_assign(int i, SDL_Keycode k) {
+  for (int j = 0; j < KB_BINDS; j++)
+    if (j != i && kbBinds[j].key == k)
+      kbBinds[j].key = kbBinds[i].key;
+  kbBinds[i].key = k;
 }
 static int controller_button(int button) {
   switch (button) {
@@ -352,6 +379,20 @@ static void events(void) {
       controller_added(e.cdevice.which);
     if (e.type == SDL_CONTROLLERDEVICEREMOVED)
       controller_removed(e.cdevice.which);
+    if (e.type == SDL_KEYDOWN && !e.key.repeat && kbCapture >= 0) {
+      // The KEYS page waits for a key: this one is it (Esc gives up), and no game key sees it.
+      if (e.key.keysym.sym != SDLK_ESCAPE && e.key.keysym.sym != SDLK_F1) {
+        kb_assign(kbCapture, e.key.keysym.sym);
+        kbCaptured = true;
+      }
+      kbCapture = -1;
+      held = pressed = 0;
+      continue;
+    }
+    if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.sym == SDLK_F1) {
+      keysOpen = !keysOpen;
+      continue;
+    }
     if ((e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) && !e.key.repeat)
       key(keyboard(e.key.keysym.sym), e.type == SDL_KEYDOWN);
     if (e.type == SDL_CONTROLLERBUTTONDOWN || e.type == SDL_CONTROLLERBUTTONUP)
@@ -503,6 +544,15 @@ static void host_load(void) {
       hostSet.battleSprites = v != 0;
     if (sscanf(line, "swap_ab=%d", &v) == 1)
       hostSet.swapAB = v != 0;
+    for (int i = 0; i < KB_BINDS; i++) { // kb_<id>=<SDL key name> (the KEYS page)
+      char key[24], name[64];
+      snprintf(key, sizeof key, "kb_%s=%%63[^\n]", kbBinds[i].id);
+      if (sscanf(line, key, name) == 1) {
+        SDL_Keycode k = SDL_GetKeyFromName(name);
+        if (k != SDLK_UNKNOWN && k != SDLK_F1)
+          kb_assign(i, k);
+      }
+    }
     char modifier[16];
     if (sscanf(line, "hk_modifier=%15s", modifier) == 1) {
       int k = key_named(modifier);
@@ -537,12 +587,69 @@ static void host_save(void) {
   fprintf(f, "ff_speed=%d\nrewind=%d\nlcd=%d\nswap_ab=%d\ncapsule_frame=%d\n", hostSet.ffSpeed, hostSet.rewind, hostSet.lcd,
           hostSet.swapAB, hostSet.capsuleFrame);
   fprintf(f, "look=%d\nweather_fx=%d\nbattle_sprites=%d\n", hostSet.look, hostSet.weatherFx, hostSet.battleSprites);
+  for (int i = 0; i < KB_BINDS; i++)
+    if (kbBinds[i].key != kbBinds[i].def)
+      fprintf(f, "kb_%s=%s\n", kbBinds[i].id, SDL_GetKeyName(kbBinds[i].key));
   fprintf(f, "hk_modifier=%s\n", key_name(hostSet.modifier));
   for (int i = 0; i < HK_ACTIONS; i++) {
     fprintf(f, "hk_%s=%s\n", hotkeyIds[i], key_name(hostSet.hotkey[i]));
     fprintf(f, "ds_hk_%s=%s\n", hotkeyIds[i], key_name(hostSet.dsHotkey[i]));
   }
   fclose(f);
+}
+
+/* ---- the KEYS page (F1, or the menu's KEYS): every keyboard key, changed by pressing the new one ---- */
+static char kbRows[KB_BINDS + 1][72];
+static const char *kbPtrs[KB_BINDS + 1];
+static int kbMap[KB_BINDS + 1];
+static int kb_rows(void) {
+  int n = 0;
+  for (int i = 0; i < KB_BINDS; i++) {
+    int a = kbBinds[i].action;
+    if (pure && (a == RWKEY || a == SAVEKEY || a == LOADKEY)) // Capsule's build: no states, no rewind
+      continue;
+    snprintf(kbRows[n], sizeof kbRows[n], "%s   [ %s ]", pd_tr(kbBinds[i].label),
+             kbCapture == i ? "..." : kb_key_label(kbBinds[i].key));
+    kbPtrs[n] = kbRows[n];
+    kbMap[n++] = i;
+  }
+  snprintf(kbRows[n], sizeof kbRows[n], "%s", pd_tr("DEFAULT KEYS"));
+  kbPtrs[n] = kbRows[n];
+  kbMap[n++] = -1;
+  return n;
+}
+static void kb_open(struct pd_menu *m) {
+  int n = kb_rows();
+  pd_menu_init(m, "", kbPtrs, n);
+  m->overlay = true;
+}
+/* One frame of the KEYS page; false once it closes (B, Esc, F1). */
+static bool kb_page(struct pd_menu *m) {
+  m->count = kb_rows();
+  m->title = kbCapture >= 0 ? pd_tr("PRESS THE NEW KEY  (ESC: CANCEL)") : pd_tr("KEYS   A: CHANGE   B: BACK");
+  if (kbCaptured) {
+    kbCaptured = false;
+    host_save();
+  }
+  if (kbCapture >= 0)
+    return true;
+  if (down(UP))
+    pd_menu_move(m, -1);
+  if (down(DOWN))
+    pd_menu_move(m, 1);
+  if (down(B) || down(MENU))
+    return false;
+  if (down(A)) {
+    int i = kbMap[m->selected];
+    if (i < 0) {
+      for (int k = 0; k < KB_BINDS; k++)
+        kbBinds[k].key = kbBinds[k].def;
+      host_save();
+      notice(pd_tr("Keys back to the defaults"));
+    } else
+      kbCapture = i;
+  }
+  return true;
 }
 // A hotkey's button as the HOTKEYS page shows it.
 static const char *hotkey_label(int k) {
@@ -1517,7 +1624,7 @@ extern int pd_ds_run(const char *, const char *, int, const char *, SDL_Renderer
 static bool ds_running(void) { return running != 0; }
 #endif
 // The host menu's rows, top to bottom (fast-forward is the FAST FORWARD hotkey's, held).
-enum { M_RESUME, M_SAVE, M_LOAD, M_HISTORY, M_COOP, M_HOTKEYS, M_REWIND, M_FFSPEED, M_LOOK, M_WEATHER, M_SPRITES, M_LCD, M_FRAME,
+enum { M_RESUME, M_SAVE, M_LOAD, M_HISTORY, M_COOP, M_KEYS, M_HOTKEYS, M_REWIND, M_FFSPEED, M_LOOK, M_WEATHER, M_SPRITES, M_LCD, M_FRAME,
        M_SWAP, M_QUIT, M_COUNT };
 /* SAVE HISTORY (the host menu, Capsule's build): the save's backups to go back to, newest first, by date. A pick asks
  * first; then the game closes (its progress written and backed up like any other, so going back can be undone), the
@@ -1804,8 +1911,9 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
   static char rows[M_COUNT][40], hkRows[HK_ACTIONS + 1][40];
   static const char *rowPtrs[M_COUNT], *hkPtrs[HK_ACTIONS + 1];
   static const char *const hkNames[HK_ACTIONS] = {"FAST FORWARD", "REWIND", "SAVE STATE", "LOAD STATE"};
-  bool hkPage = false, histPage = false, coopPage = false;
-  struct pd_menu histMenu, coopMenu;
+  bool hkPage = false, histPage = false, coopPage = false, kbPage = false;
+  struct pd_menu histMenu, coopMenu, kbMenu;
+  notice(pd_tr("F1: KEYS   ESC: MENU"));
 #ifdef CAPSULE_COOP
   static const char *coopPtrs[12];
 #endif
@@ -1848,19 +1956,21 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     snprintf(rows[M_SAVE], 40, "SAVE STATE");
     snprintf(rows[M_LOAD], 40, "LOAD STATE");
     if (hostSet.ffSpeed)
-      snprintf(rows[M_FFSPEED], 40, "FF SPEED  %dx", hostSet.ffSpeed);
+      snprintf(rows[M_FFSPEED], 40, "%s  %dx", pd_tr("FF SPEED"), hostSet.ffSpeed);
     else
-      snprintf(rows[M_FFSPEED], 40, "FF SPEED  MAX");
-    snprintf(rows[M_REWIND], 40, "REWIND  %s", hostSet.rewind ? "ON" : "OFF");
-    snprintf(rows[M_LCD], 40, "LCD FILTER  %s", hostSet.lcd ? "ON" : "OFF");
-    snprintf(rows[M_FRAME], 40, "CAPSULE FRAME  %s", hostSet.capsuleFrame ? "ON" : "OFF");
+      snprintf(rows[M_FFSPEED], 40, "%s  %s", pd_tr("FF SPEED"), pd_tr("MAX"));
+#define ONOFF(b) pd_tr((b) ? "ON" : "OFF")
+    snprintf(rows[M_REWIND], 40, "%s  %s", pd_tr("REWIND"), ONOFF(hostSet.rewind));
+    snprintf(rows[M_LCD], 40, "%s  %s", pd_tr("LCD FILTER"), ONOFF(hostSet.lcd));
+    snprintf(rows[M_FRAME], 40, "%s  %s", pd_tr("CAPSULE FRAME"), ONOFF(hostSet.capsuleFrame));
 #ifdef POCKET_PURE
-    snprintf(rows[M_LOOK], 40, "%s", fxLookRows[hostSet.look]);
+    snprintf(rows[M_LOOK], 40, "%s  %s", pd_tr("LOOK"), pd_tr(fxLookRows[hostSet.look] + 6));
 #endif
-    snprintf(rows[M_WEATHER], 40, "WEATHER AND LIGHTS  %s", hostSet.weatherFx ? "ON" : "OFF");
-    snprintf(rows[M_SPRITES], 40, "BATTLE SPRITES  %s", hostSet.battleSprites ? "ON" : "OFF");
-    snprintf(rows[M_SWAP], 40, "A/B BUTTONS  %s", hostSet.swapAB ? "SWAPPED" : "NORMAL");
-    snprintf(rows[M_HOTKEYS], 40, "HOTKEYS");
+    snprintf(rows[M_WEATHER], 40, "%s  %s", pd_tr("WEATHER AND LIGHTS"), ONOFF(hostSet.weatherFx));
+    snprintf(rows[M_SPRITES], 40, "%s  %s", pd_tr("BATTLE SPRITES"), ONOFF(hostSet.battleSprites));
+    snprintf(rows[M_SWAP], 40, "%s  %s", pd_tr("CONTROLLER A/B"), pd_tr(hostSet.swapAB ? "SWAPPED" : "NORMAL"));
+    snprintf(rows[M_HOTKEYS], 40, "%s", pd_tr("CONTROLLER HOTKEYS"));
+    snprintf(rows[M_KEYS], 40, "%s", pd_tr("KEYBOARD KEYS"));
     snprintf(rows[M_HISTORY], 40, "SAVE HISTORY");
 #ifdef CAPSULE_COOP
     snprintf(rows[M_COOP], 40, "%s", capsule_coop_menu_row());
@@ -1908,13 +2018,28 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
       if (coopPage)
         capsule_coop_page_left();
 #endif
-      hkPage = histPage = coopPage = false;
+      hkPage = histPage = coopPage = kbPage = false;
+      kbCapture = -1;
       confirming = 0;
       capturing = -1;
       if (menuOpen) {
         pd_menu_init(&menu, "POKEDAISY", rowPtrs, menuRows);
         menu.overlay = true;
       }
+    }
+    if (keysOpen) { // F1: the KEYS page, over the game (again: closed)
+      keysOpen = false;
+      if (menuOpen && kbPage) {
+        menuOpen = kbPage = false;
+      } else {
+        menuOpen = kbPage = true;
+        hkPage = histPage = coopPage = false;
+        confirming = 0;
+        pd_menu_init(&menu, "POKEDAISY", rowPtrs, menuRows);
+        menu.overlay = true;
+        kb_open(&kbMenu);
+      }
+      menuConsumed |= held;
     }
     unsigned hkFired = 0, hkOn = 0;
     hotkeyMask = 0;
@@ -2031,6 +2156,9 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
           coopMenu.selected = coopMenu.count - 1;
       }
 #endif
+    } else if (menuOpen && kbPage) {
+      if (!kb_page(&kbMenu))
+        kbPage = false;
     } else if (menuOpen && histPage) {
       if (down(UP))
         pd_menu_move(&histMenu, -1);
@@ -2144,6 +2272,10 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
           break;
         }
 #endif
+        case M_KEYS:
+          kbPage = true;
+          kb_open(&kbMenu);
+          break;
         case M_HOTKEYS:
           hkPage = true;
           pd_menu_init(&hkMenu, "HOTKEYS", hkPtrs, hkRowCount);
@@ -2162,7 +2294,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     if (menuFrame) {
       muted = true;
       gameKeys = 0;
-      present_game(menuOpen ? (confirming ? &confirmMenu : hkPage ? &hkMenu : histPage ? &histMenu : coopPage ? &coopMenu : &menu) : NULL);
+      present_game(menuOpen ? (confirming ? &confirmMenu : kbPage ? &kbMenu : hkPage ? &hkMenu : histPage ? &histMenu : coopPage ? &coopMenu : &menu) : NULL);
       if (maxFrames && ++frames >= maxFrames) { // a scripted run can end, and be captured, with the menu up
         if (shot && !capture(shot))
           appError = 1;
@@ -2334,6 +2466,8 @@ static void exe_dir(const char *argv0) {
 int main(int argc, char **argv) {
   const char *rom = NULL, *shot = NULL;
   int frames = 0;
+  pd_tr_set_language(host_language()); // the host's own menus and notices, in the player's language
+  keysOpen = getenv("POCKET_SHOW_KEYS") != NULL; // the KEYS page open at once (screenshots)
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--data") && i + 1 < argc)
       root = argv[++i];
@@ -2429,8 +2563,9 @@ int main(int argc, char **argv) {
     // Capsule's build with Capsule.exe's list: X / Y open COMPATIBLE GAMES (compat_load).
     if (pure)
       compat_load();
-    const char *listTitle = compat.count ? "PokeDaisy   X / Y / Tab : jeux compatibles" : "PokeDaisy Linux";
-    bool compatOpen = false, compatDetail = false;
+    const char *listTitle = pure ? pd_tr("CHOOSE A GAME") : "PokeDaisy Linux";
+    bool compatOpen = false, compatDetail = false, listKeys = false;
+    struct pd_menu listKbMenu;
     /* (Re)reads the list, [select] (a path) picked if it's there. */
     #define SCAN_ROMS(select)                                                                                        \
       do {                                                                                                             \
@@ -2528,6 +2663,26 @@ int main(int argc, char **argv) {
         }
         free(d);
       }
+      if (keysOpen || listKeys) { // F1: the KEYS page over the list
+        if (keysOpen && !listKeys)
+          kb_open(&listKbMenu);
+        bool stay = !(keysOpen && listKeys);
+        keysOpen = false;
+        listKeys = stay && kb_page(&listKbMenu);
+        SDL_RenderClear(renderer);
+        overlay_begin();
+        pd_menu_draw(listKeys ? &listKbMenu : &list, &overlay);
+        overlay_notice();
+        overlay_draw(true);
+        SDL_RenderPresent(renderer);
+        if (frames && ++ticks >= frames) {
+          if (shot && !capture(shot))
+            appError = 1;
+          break;
+        }
+        SDL_Delay(16);
+        continue;
+      }
       if (compatOpen) { // COMPATIBLE GAMES: A a game's details, B back (the details first)
         if (down(UP))
           compatDetail = false, pd_menu_move(&compatMenu, -1);
@@ -2560,7 +2715,7 @@ int main(int argc, char **argv) {
       if (compat.count && !pendingPatch && (down(X) || down(Y))) {
         compat_load(); // Capsule.exe may have written it again since
         if (compat.count) {
-          pd_menu_init(&compatMenu, "JEUX COMPATIBLES", compat.ptrs, compat.count);
+          pd_menu_init(&compatMenu, pd_tr("COMPATIBLE GAMES"), compat.ptrs, compat.count);
           compatOpen = true;
           compatDetail = false;
           continue;
@@ -2590,6 +2745,14 @@ int main(int argc, char **argv) {
       SDL_RenderClear(renderer);
       overlay_begin();
       pd_menu_draw(&list, &overlay);
+      { // the keys that work here, along the bottom
+        char hint[160];
+        snprintf(hint, sizeof hint, "%s: %s   %s: %s   F1: %s%s%s", kb_key_label(kbBinds[6].key), pd_tr("PLAY"),
+                 kb_key_label(kbBinds[18].key), pd_tr("QUIT"), pd_tr("KEYS"), compat.count ? "   TAB: " : "",
+                 compat.count ? pd_tr("COMPATIBLE GAMES") : "");
+        pd_fill(&overlay, 0, overlay.h - 17, overlay.w, 17, 0x203048);
+        pd_text_fit(&overlay, 6, overlay.h - 15, overlay.w - 12, hint, 0xFFFFFF, PD_NO_SHADOW);
+      }
       overlay_notice();
       overlay_draw(true);
       SDL_RenderPresent(renderer);
