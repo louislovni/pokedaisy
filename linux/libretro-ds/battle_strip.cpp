@@ -6,6 +6,7 @@ extern "C" {
 #include "pd_snapshot.h"
 }
 #include <algorithm>
+#include <cstdlib>
 
 bool DsBattleView::enabled(int slot) const {
   if(slot<0 || slot>=4)return false;
@@ -126,7 +127,63 @@ DsBattleView read_gen5(const PkNdsFieldGame* game,uint32_t (*read32)(uint32_t)) 
 
 void ds_battle_set_base_pp(std::vector<uint8_t> table){basePp=std::move(table);}
 
-DsBattleView ds_read_battle(const PkNdsFieldGame* game,uint32_t (*read32)(uint32_t),int scene) {
+namespace {
+// Origin HeartGold's own battle engine (pk_nds_field.cpp's battleManagerPtr; Gen4Reader.kt's Gen4ManagedBattle): its
+// manager's battle objects - the player's from +0x60 in battle order, the active slots' bytes through +0x58, the setup's
+// type through +0x10 - each with its species at +0, its party record at +0x10 and four moves of 0x12 bytes from +0x250
+// (the move at +2, its PP at +4). Its panels aren't HeartGold's but sit where HeartGold's touch targets land (FIGHT a big
+// red plate in the middle, BAG / RUN / POKeMON along the foot; four move cards in two rows over a CANCEL bar), so they are
+// told apart by the touch screen's colours: FIGHT's red over its darker foot, and the CANCEL bar's dark grey under the cards
+// with their light gaps at the sides (headless, Origin HeartGold rc8: a wild battle's commands and moves).
+bool near(uint32_t p,uint32_t want,int tolerance=24){
+  for(int shift=0;shift<24;shift+=8)
+    if(std::abs(int((p>>shift)&255)-int((want>>shift)&255))>tolerance)return false;
+  return true;
+}
+DsBattlePanel managed_panel(const uint32_t* lower){
+  if(!lower)return DsBattlePanel::Native;
+  auto at=[&](int x,int y){return lower[y*256+x]&0xffffff;};
+  if(near(at(128,60),0xeb3838) && near(at(128,100),0x8a4141) && near(at(128,172),0x2892cb))return DsBattlePanel::Actions;
+  if(near(at(128,176),0x414141) && near(at(20,100),0xfbfbfb,12) && near(at(236,100),0xfbfbfb,12) &&
+     near(at(64,42),0xfbfbfb,12))
+    return DsBattlePanel::Moves;
+  return DsBattlePanel::Native;
+}
+DsBattleView read_managed(const PkNdsFieldGame* game,uint32_t (*read32)(uint32_t),const uint32_t* lower){
+  if(pk_nds_battle_command(game,read32)!=PK_NDS_BATTLE_SELECTING)return {};
+  const auto panel=managed_panel(lower);
+  if(panel==DsBattlePanel::Native)return {};
+  const auto mgr=read32(game->battleManagerPtr);
+  if(!in_ram(mgr,0x7c))return {};
+  const auto active=read32(mgr+0x58), setup=read32(mgr+0x10);
+  if(!in_ram(active&~3u))return {};
+  const uint32_t slots=read32(active&~3u)>>((active&3)*8);
+  const unsigned slot=slots&0xff;
+  // A double (a second active slot) would need to know whose turn it is: its own panels, then.
+  if(slot>=6 || ((active&3)<3 && ((slots>>8)&0xff)!=0xff))return {};
+  const auto obj=read32(mgr+0x60+slot*4);
+  if(!in_ram(obj,0x2a0))return {};
+  DsBattleView view;
+  view.panel=panel;
+  view.species=read32(obj)&0xffff;
+  if(view.species<1 || view.species>dsOriginLastSpecies)return {};
+  const auto record=read32(obj+0x10);
+  if(in_ram(record))view.personality=read32(record);
+  view.trainer=in_ram(setup) && (read32(setup)&1);
+  for(int i=0;i<4;++i){
+    const unsigned at=0x250+i*0x12;
+    auto u16=[&](unsigned o){return (read32(obj+(o&~3u))>>((o&3)*8))&0xffff;};
+    view.moves[i]=int(u16(at+2));
+    view.pp[i]=int(u16(at+4)&0xff);
+    const int most=max_pp(view.moves[i],0);
+    view.maxPp[i]=most>=view.pp[i]?most:0;
+  }
+  return view;
+}
+}
+
+DsBattleView ds_read_battle(const PkNdsFieldGame* game,uint32_t (*read32)(uint32_t),int scene,const uint32_t* lower) {
+  if(game && game->battleManagerPtr && ds_origin())return read_managed(game,read32,lower);
   if(!game || game->battleManagerPtr || !(scene&PK_NDS_FIELD_TOUCH_BATTLE_MENU))return {};
   const auto view=game->gen==5?read_gen5(game,read32):read_gen4(game,read32);
   if(view.panel==DsBattlePanel::Moves &&
@@ -298,6 +355,7 @@ void ds_read_battle_balls(const PkNdsFieldGame* game,uint32_t (*read32)(uint32_t
 }
 
 const char* ds_battle_species(const DsBattleView& view){
+  if(!view.gen5 && ds_origin())return ds_species(view.species,DsGame::Johto);
   return view.gen5?unovaSpecies[view.species]:species[view.species];
 }
 

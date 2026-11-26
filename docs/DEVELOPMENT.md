@@ -3473,8 +3473,13 @@ machines by its own rule (the species' `/data/tutor_moves.narc` list or its lear
 The DS libretro core (Capsule on iPhone and PC) has the same companion: `ds_origin_cart` (the same pool-word check) and
 `ds_origin_read` (`linux/dsperate/map_art.cpp`) read these tables from the cart at load, `ds_select_origin` points HeartGold's
 reader (`DsGame::Johto`) at the hack's addresses and offsets, and the names, types, icons and DEX come from the tables. The
-fronts are kept as each species' first frame (80 x 40 bytes and 16 colours, 6.6 MB) rather than the whole archive. No battle
-strip and no GUIDE there. `ds-origin-check ROM mainram.bin [OUT]` checks it against the `origin_heartgold` fixture (not in ctest:
+fronts are kept as each species' first frame (80 x 40 bytes and 16 colours, 6.6 MB) rather than the whole archive. No GUIDE
+there, but the battle strip works (2026-11-26, the user's request): its panels sit where HeartGold's touch targets land, so
+HeartGold's strip taps them; `battle_strip.cpp`'s `read_managed` takes the moves and PP from the manager's battle objects
+(as `Gen4ManagedBattle`) and tells the commands from the moves by the touch screen's colours (FIGHT's red plate; the CANCEL
+bar under the cards), only while `pk_nds_battle_command` says the battle waits, and not in a double. Found headless from the
+player's own save: the test build (`-DPD_DS_TEST`) has `retro_pd_test_fly` and `retro_pd_test_script` (HeartGold script bytes
+run as PC anywhere's are: `LockAll`, `WildBattle 589 species level 0`, `ReleaseAll`, `End` made the battle). `ds-origin-check ROM mainram.bin [OUT]` checks it against the `origin_heartgold` fixture (not in ctest:
 it needs the cart).
 
 **Heartfelt Gold** (v1.0.15, SHA-1 `b2b27aeb…`; its Zoomed In camera patch `2eaf49cc…`; 2026-11-16): hg-engine over the

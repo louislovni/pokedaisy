@@ -483,7 +483,7 @@ bool wants_strip() {
 }
 DsBattleView battle_view(int bits) {
   if(!wants_strip() || (buttons&(1u<<RETRO_DEVICE_ID_JOYPAD_SELECT)))return {};
-  return ds_read_battle(game,read32,bits);
+  return ds_read_battle(game,read32,bits,nds->gpu.framebuffer(1));
 }
 void update_battle(unsigned pressed,int field) {
   battleHeld&=buttons;
@@ -1522,15 +1522,17 @@ RETRO_API bool retro_load_game(const retro_game_info* info){
       pd_ds::game=pk_nds_field_game(reinterpret_cast<const char*>(rom.data()+12),rom[30]);
     }
     // Origin HeartGold: a Japanese HeartGold's header, its own code. HeartGold's companion at its addresses, with its
-    // names, types and art read from the cart; no battle strip (its battle engine is its own).
+    // names, types and art read from the cart; its battle engine is its own, read by battle_strip.cpp's read_managed under
+    // HeartGold's strip.
     if(pd_ds::companionGame==DsGame::Unsupported&&ds_origin_cart(rom)&&ds_origin_read(rom,pd_ds::originTables)){
       ds_select_origin(&pd_ds::originTables);
-      pd_ds::companionGame=DsGame::Johto;pd_ds::soulSilver=false;pd_ds::battleStyle=nullptr;
+      pd_ds::companionGame=DsGame::Johto;pd_ds::soulSilver=false;
+      pd_ds::battleStyle=ds_battle_style(pd_ds_data::heartGoldSha1);
       pd_ds::game=pk_nds_field_game_rom(rom.data(),uint32_t(rom.size()));
       log(RETRO_LOG_INFO,"PokeDaisy DS: Origin HeartGold\n");
     }
     ds_battle_set_base_pp({});
-    if(pd_ds::battleStyle)
+    if(pd_ds::battleStyle && !ds_origin())
       pd_ds::game=pk_nds_field_game(reinterpret_cast<const char*>(rom.data()+12),rom[30]);
     if(pd_ds::companionGame!=DsGame::Unsupported)pd_ds::map=ds_map_art(rom,pd_ds::companionGame);
     if(pd_ds::companionGame!=DsGame::Unsupported){
@@ -1551,6 +1553,22 @@ RETRO_API bool retro_load_game(const retro_game_info* info){
   pd_ds::wide::read_panel(true);
   return true;
 }
+#ifdef PD_DS_TEST
+// Headless tests only: FLY's call from the field, as the quick menu makes it.
+RETRO_API int retro_pd_test_fly(unsigned header,unsigned x,unsigned y){
+  const uint32_t args[]={0,header,x,y};
+  pd_ds::flyCallJob=pk_nds_call_action(pd_ds::field_call_memory(),pd_ds::game,PK_NDS_ACTION_FLY,args);
+  return pd_ds::flyCallJob;
+}
+extern unsigned char pk_nds_test_script[128];
+extern unsigned pk_nds_test_script_len;
+RETRO_API int retro_pd_test_script(const unsigned char* bytes,unsigned n){
+  if(n>sizeof pk_nds_test_script)return 0;
+  std::memcpy(pk_nds_test_script,bytes,n);pk_nds_test_script_len=n;
+  const uint32_t args[]={0,0,0,0};
+  return pk_nds_call_action(pd_ds::field_call_memory(),pd_ds::game,99,args);
+}
+#endif
 RETRO_API void retro_reset(){
   pd_ds::clear_battle();pd_ds::reset_skip();pd_ds::noticeFrames=0;
   ds_reset();pd_ds::clear_hud_focus();pd_ds::stageReady=false;pd_ds::clear_field_actions();pd_ds::flyJob={};pd_ds::flyPicker=pd_ds::heldQuickConfirm=false;pd_ds::companion=pd_ds::quickOpen=false;pd_ds::shell.picker=-1;pd_ds::shell.summary=false;pd_ds::shell.details=false;pd_ds::shell.dexEntry=0;pd_ds::shell.guideLoadedPage=-1;pd_ui_guide_reset(&pd_ds::shell.frame);pd_ds::shell.placeRow=pd_ds::shell.mapAction=-1;pd_ds::screen_override=0;pd_ds::snapshot={};pd_ds::repelFull=0;pd_ds::tick=0;pd_ds::scene.reset();pd_ds::arrangement={};pd_ds::manualTouch=pd_ds::fieldValid=pd_ds::fieldMenuFlow=false;pd_ds::companionHold=0;

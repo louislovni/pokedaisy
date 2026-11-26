@@ -8,7 +8,9 @@ extern "C" {
 #include "pd_ui.h"
 }
 
+extern "C" int pd_type_fairy9;
 inline uint32_t ds_type_color(int type){
+  if(type==9 && pd_type_fairy9)return 0xee99ac; // Origin HeartGold's Fairy
   // The type IDs and colors already used by the DS battle strip.
   constexpr uint32_t colors[]={0xa8a878,0xc03028,0xa890f0,0xa040a0,0xe0c068,0xb8a038,
     0xa8b820,0x705898,0xb8b8d0,0x68a090,0xf08030,0x6890f0,0x78c850,0xf8d030,

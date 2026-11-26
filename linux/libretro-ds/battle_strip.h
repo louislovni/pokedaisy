@@ -30,7 +30,8 @@ struct DsBattleView {
 // Each move's base PP from the cart's own move table (ds_move_base_pp), for maxPp. An empty table: no maxPp.
 void ds_battle_set_base_pp(std::vector<uint8_t> table);
 // Call only after the exact supported ROM identity has been established.
-DsBattleView ds_read_battle(const PkNdsFieldGame*,uint32_t (*read32)(uint32_t),int scene);
+// [lower]: the touch screen as drawn (256 x 192, 0xRRGGBB), which tells a hack's own battle panels apart (Origin HeartGold).
+DsBattleView ds_read_battle(const PkNdsFieldGame*,uint32_t (*read32)(uint32_t),int scene,const uint32_t* lower=nullptr);
 void ds_read_battle_companion(const PkNdsFieldGame*,uint32_t (*read32)(uint32_t),
                               const uint8_t* ram,size_t ramSize,const DsCompanion&,pd_snapshot&);
 // Fills the view's ball rows from the battle (see DsBattleView::balls); the foe's row only against a trainer.

@@ -476,7 +476,10 @@ void native_move_card(pd_canvas& canvas,Rect dst,const uint32_t* lower,int slot)
 // The type names the games print on their move cards: capitals, cut to six (ELECTR, PSYCHC), in type order.
 const char* const cardTypes[]={"NORMAL","FIGHT","FLYING","POISON","GROUND","ROCK","BUG","GHOST","STEEL","???",
   "FIRE","WATER","GRASS","ELECTR","PSYCHC","ICE","DRAGON","DARK"};
-const char* card_type(int type){return type>=0 && type<int(std::size(cardTypes))?cardTypes[type]:"???";}
+const char* card_type(int type){
+  if(type==9 && pd_type_fairy9)return "FAIRY"; // Origin HeartGold's Fairy, in ???'s place
+  return type>=0 && type<int(std::size(cardTypes))?cardTypes[type]:"???";
+}
 
 // PP as the cards show it: current / max where the max is known, tinted as it runs low (half, a quarter, none).
 uint32_t pp_ink(int pp,int maxPp,uint32_t ink){
@@ -572,7 +575,9 @@ constexpr int nameTop=7,detailsTop=29;
 // that is white over beige) and Platinum's (cream) when its own art isn't there yet. A move out of PP keeps its name
 // readable on a greyed card, and its count is red.
 void gen4_move_card(pd_canvas& canvas,Rect r,int move,int pp,int maxPp,bool enabled,DsBattleLook look){
-  const int type=ds_move_type(move,DsGame::Platinum);
+  // Origin HeartGold's moves past the retail games' (and their types, Fairy as 9) are its own, read from its cart.
+  const DsGame names=ds_origin()?DsGame::Johto:DsGame::Platinum;
+  const int type=ds_move_type(move,names);
   const unsigned tone=enabled?100:78;
   uint32_t frame=move?ds_type_color(type):0x8a8a92;
   if(move && type==0)frame=0x8a79ab;
@@ -594,7 +599,7 @@ void gen4_move_card(pd_canvas& canvas,Rect r,int move,int pp,int maxPp,bool enab
   pd_fill(&canvas,face.x,split,face.w,face.y+face.h-split,shade(faceLow,tone));
   if(!move)return;
   const uint32_t ink=0x403848, shadow=shade(platinum?0xd0c890:0xc8c0b8,tone);
-  caps2_centre(canvas,face.x,face.w,r.y+nameTop,ds_move(move),ink,shadow);
+  caps2_centre(canvas,face.x,face.w,r.y+nameTop,ds_move(move,names),ink,shadow);
   details_row(canvas,face.x+3,face.x+face.w-5,r.y+detailsTop,type,pp,maxPp,tone,false,ink,
               shade(platinum?0xc0b070:0xb8a890,tone));
 }

@@ -635,6 +635,10 @@ static int gen5Action(const PkNdsCallMemory& mem, const PkNdsFieldGame* game, co
 // Scratch for structs a job hands the game (a FieldMoveContext): past the script, in the same unused ITCM.
 constexpr u32 SCRATCH = PK_NDS_SCRIPT_ADDR + PK_NDS_SCRIPT_MAX;
 
+#ifdef PD_DS_TEST
+unsigned char pk_nds_test_script[128];
+unsigned pk_nds_test_script_len;
+#endif
 int pk_nds_call_action(const PkNdsCallMemory& mem, const PkNdsFieldGame* game, int action, const uint32_t args[4])
 {
     if (const Gen5Fns* g5 = gen5FnsFor(game)) return !(pending.seq && pending.state == 0) ? gen5Action(mem, game, *g5, action, args) : 0;
@@ -685,6 +689,13 @@ int pk_nds_call_action(const PkNdsCallMemory& mem, const PkNdsFieldGame* game, i
         o.add(f->journalSaveData, Ops::res(j), Ops::res(ev), (u32) f->journalLocation);
         break;
     }
+#ifdef PD_DS_TEST
+    case 99:
+        hgScriptJob(o, *f, fs, *game);
+        script = pk_nds_test_script;
+        scriptLen = pk_nds_test_script_len;
+        break;
+#endif
     default:
         return 0;
     }
