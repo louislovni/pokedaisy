@@ -1137,7 +1137,7 @@ static void bs_after_run(void);
 static void bs_draw(void);
 static void amb_after_run(void);
 static void amb_draw(void);
-static void nature_after_run(bool outdoors, bool clear, int season, int rain);
+static void nature_after_run(bool outdoors, bool clear, int season, int rain, bool snow);
 static int ambKind, ambSeasonDrawn; /* DS WEATHER and SEASONS (below) */
 static bool bs_wanted(void);
 static void canvas_update(bool notify) {
@@ -3153,7 +3153,8 @@ static void amb_after_run(void) {
     ambCamH = ambCamV = -1, ambCamDx = ambCamDy = 0;
   ambSeasonDrawn = field && fine && ambKind < 0 && ambSeasonShown >= 0 && ambSeasonShown != SEASON_SUMMER ? ambSeasonShown : -1;
   nature_after_run(field && !snap.inBattle, field && fine && ambKind < 0 && !snap.inBattle, season,
-                   ambSky && (ambKind == DSW_RAIN || ambKind == DSW_STORM) ? (ambKind == DSW_STORM ? 2 : 1) : 0);
+                   ambSky && (ambKind == DSW_RAIN || ambKind == DSW_STORM) ? (ambKind == DSW_STORM ? 2 : 1) : 0,
+                   field && !snap.inBattle && ambSky && ambKind == DSW_SNOW);
   if (!haveGame) {
     dsw_reset();
     ambPlayFrames = 0;
@@ -3186,11 +3187,16 @@ static void amb_plot(int x, int y, uint32_t rgb, int a) {
   *d = r << 16 | g << 8 | b;
 }
 /* NATURE (Capsule's build, retro_pd_nature): what the world does by itself, none of it the game's own - fireflies on a
- * summer night, a shooting star now and then on a clear night, an autumn morning's mist (the device's clock and the
- * SEASONS' season, else the calendar's), and the rain and thunder heard under DYNAMIC WEATHER (made here: noise). */
+ * summer night, a shooting star now and then on a clear night, an autumn morning's mist, a sunrise's pink and a sunset's
+ * orange glow over the sky, splashes at the player's feet in DYNAMIC WEATHER's rain and footprints in
+ * its snow (the device's clock and the SEASONS' season, else the calendar's); heard: the rain and thunder, birds on a
+ * fine morning, crickets on a summer or autumn night, the wind in the snow (all made here: noise and tones). */
 static bool natureOn = true;
 RETRO_API void retro_pd_nature(int on) { natureOn = on != 0; }
 static int natureRain;                       // DYNAMIC WEATHER's rain heard: 0 none, 1 rain, 2 storm
+static bool natureSnow;                      // DYNAMIC WEATHER's snow: the wind heard, footprints
+static int glowK, glowRgb;                   // sunrise / sunset glow (eased 0..256) and its colour
+static float birdsWant, cricketsWant, windWant; // what's heard: 0..1
 static int flyK, starOk, mistK;              // fireflies / stars (eased 0..256) / mist strength
 static uint32_t natureSeed = 0x2545F491u;
 static uint32_t nature_rand(void) {
@@ -3222,10 +3228,27 @@ static int nature_season(int season) {
   const int m = tmv.tm_mon; // Mar-May spring, Jun-Aug summer, Sep-Nov autumn, Dec-Feb winter
   return m >= 2 && m <= 4 ? SEASON_SPRING : m >= 5 && m <= 7 ? SEASON_SUMMER : m >= 8 && m <= 10 ? SEASON_AUTUMN : SEASON_WINTER;
 }
-static void nature_after_run(bool outdoors, bool clear, int season, int rain) {
+static void nature_after_run(bool outdoors, bool clear, int season, int rain, bool snow) {
   natureRain = natureOn && outdoors ? rain : 0;
+  natureSnow = natureOn && outdoors && snow;
   const float h = nature_hour();
   const int s = nature_season(season);
+  // Sunrise (5:15-7:15, at its height at 6:00) pink; sunset (17:15-19:30, at 18:30) orange.
+  int glow = 0;
+  if (natureOn && clear) {
+    if (h >= 5.25f && h < 7.25f)
+      glow = (int)(256 * (h < 6.f ? (h - 5.25f) / 0.75f : (7.25f - h) / 1.25f)), glowRgb = 0xFF8FB0;
+    else if (h >= 17.25f && h < 19.5f)
+      glow = (int)(256 * (h < 18.5f ? (h - 17.25f) / 1.25f : (19.5f - h) / 1.f)), glowRgb = 0xFF8A3A;
+  }
+  glowK += glow > glowK ? 2 : glow < glowK ? -4 : 0;
+  if (glowK < 0)
+    glowK = 0;
+  // Heard: birds on a fine morning (5:30-10:30, fewer in winter), crickets on a summer or early autumn night (20:30-4:00),
+  // the wind in the snow.
+  birdsWant = natureOn && clear && h >= 5.5f && h < 10.5f ? (s == SEASON_WINTER ? 0.3f : 1.f) : 0.f;
+  cricketsWant = natureOn && clear && (h >= 20.5f || h < 4.f) && (s == SEASON_SUMMER || s == SEASON_AUTUMN) ? 1.f : 0.f;
+  windWant = natureSnow ? 1.f : natureRain == 2 ? 0.5f : 0.f;
   const bool night = h >= 21.5f || h < 4.5f;
   const int flyWant = natureOn && clear && night && s == SEASON_SUMMER ? 256 : 0;
   flyK += flyWant > flyK ? 4 : flyWant < flyK ? -8 : 0;
@@ -3270,8 +3293,84 @@ static void nature_mist(int scale) {
           amb_plot(x, y, 0xD8DEE4, a);
     }
 }
+/* The player's steps (the map scrolling: a tile walked) in the rain: a splash at the feet; in the snow: a footprint left on
+ * the map (carried with it, fading in ~5 s). The feet: the picture's middle, 6 pixels down (the camera keeps the player
+ * there). */
+static struct { float x, y; int age, kind, side; } steps[24];
+static float stepWalked;
+static int stepSide;
+static void nature_steps(float camX, float camY, int scale) {
+  for (size_t i = 0; i < sizeof steps / sizeof *steps; i++)
+    if (steps[i].age > 0)
+      steps[i].x -= camX, steps[i].y -= camY;
+  const float moved = fabsf(camX) + fabsf(camY);
+  if ((natureRain || natureSnow) && moved > 0 && moved < 8.f * scale) {
+    stepWalked += moved;
+    if (stepWalked >= 8.f * scale) { // each half tile: a foot
+      stepWalked = 0;
+      size_t k = 0;
+      for (size_t i = 1; i < sizeof steps / sizeof *steps; i++)
+        if (steps[i].age == 0 || (steps[k].age && steps[i].age > steps[k].age))
+          k = i;
+      const float sideways = fabsf(camY) > fabsf(camX) ? 1.f : 0.f; // walking up/down: feet side by side
+      stepSide ^= 1;
+      steps[k].x = CW / 2.f + (stepSide ? 2.f : -2.f) * scale * sideways;
+      steps[k].y = CH / 2.f + 6.f * scale + (stepSide ? 1.f : -1.f) * scale * (1.f - sideways);
+      steps[k].age = 1;
+      steps[k].kind = natureSnow ? 1 : 0;
+      steps[k].side = stepSide;
+    }
+  } else if (!moved)
+    stepWalked = 0;
+  for (size_t i = 0; i < sizeof steps / sizeof *steps; i++) {
+    if (!steps[i].age)
+      continue;
+    const int age = steps[i].age++;
+    const int cx = (int)steps[i].x, cy = (int)steps[i].y;
+    if (steps[i].kind == 0) { // a splash: a ring growing and going, four drops thrown out
+      if (age > 16) {
+        steps[i].age = 0;
+        continue;
+      }
+      const float r = (1.5f + age * 0.35f) * scale;
+      const int a = 200 - age * 12;
+      for (int d = 0; d < 20; d++) {
+        const float t = d * 6.2832f / 20;
+        amb_plot(cx + (int)(cosf(t) * r), cy + (int)(sinf(t) * r * 0.45f), 0xE8F2FF, a);
+      }
+      for (int d = 0; d < 4; d++) {
+        const float t = (d * 2 + 1) * 0.785f, up = age * 0.6f * scale - age * age * 0.05f * scale;
+        amb_plot(cx + (int)(cosf(t) * age * 0.5f * scale), cy - (int)up, 0xF4F8FF, a);
+      }
+    } else { // a footprint: a small sole pressed in, pale, fading
+      if (age > 300) {
+        steps[i].age = 0;
+        continue;
+      }
+      const int a = age < 240 ? 150 : 150 * (300 - age) / 60;
+      for (int y = -scale; y <= scale; y++)
+        for (int x = -scale / 2 - 1; x <= scale / 2; x++)
+          amb_plot(cx + x, cy + y, 0xF2F6FF, a);
+    }
+  }
+}
+/* Sunrise and sunset: the sky's colour over the picture's top, gone by its middle. */
+static void nature_glow_sky(void) {
+  const int rows = CH * 3 / 5;
+  for (int y = 0; y < rows; y++) {
+    const float f = 1.f - (float)y / rows;
+    const int a = (int)(glowK * f * f * 0.40f);
+    if (a <= 1)
+      break;
+    for (int x = 0; x < CW; x++)
+      amb_plot(x, y, (uint32_t)glowRgb, a);
+  }
+}
 static void nature_draw(float camX, float camY, int scale) {
   natureTick++;
+  if (glowK > 0)
+    nature_glow_sky();
+  nature_steps(camX, camY, scale);
   if (mistK > 0)
     nature_mist(scale);
   if (flyK > 0) {
@@ -3338,9 +3437,78 @@ static void nature_thunder(void) {
     thunderIn = 8000 + (int)(nature_rand() % 50000u); // 0.25-1.8 s after the flash
 }
 static float nature_noise(void) { return (int32_t)nature_rand() / 2147483648.f; }
+/* Birds: phrases of 2-7 chirps (a quick rising or falling whistle, 40-120 ms), one bird or another (pitch, place);
+ * crickets: two, a 4.2-4.7 kHz tone in pulses (three or four to a chirp, a chirp every ~0.6 s); the wind: low-passed noise
+ * in slow gusts. */
+static float birdsLevel, cricketsLevel, windLevel, windGust, windGustTo, windLp[2], windLp2[2];
+static struct { float phase, f0, f1, pan, amp; int len, at, left, gap; } bird;
+static struct { float phase, freq, pan; int period, at, pulses; } crickets[2] = {{0, 4300, 0.3f, 19000, 0, 3}, {0, 4650, 0.75f, 23500, 9000, 4}};
+static void nature_life(float out[2]) {
+  birdsLevel += (birdsWant - birdsLevel) * 0.00002f;
+  cricketsLevel += (cricketsWant - cricketsLevel) * 0.00002f;
+  windLevel += (windWant - windLevel) * 0.00002f;
+  if (birdsLevel > 0.001f) {
+    if (bird.at >= bird.len) { // between chirps
+      if (bird.gap > 0)
+        bird.gap--;
+      else if (bird.left > 0 || nature_rand() % 60000u < 1u) {
+        if (bird.left <= 0) { // a new phrase: who sings, how many
+          bird.left = 2 + (int)(nature_rand() % 6u);
+          bird.pan = (nature_rand() % 100) / 100.f;
+          bird.amp = 0.5f + (nature_rand() % 50) / 100.f;
+          bird.f0 = 2600.f + (float)(nature_rand() % 1800u);
+        }
+        bird.left--;
+        const float spread = 600.f + (float)(nature_rand() % 1400u);
+        bird.f1 = nature_rand() & 1 ? bird.f0 + spread : bird.f0 - spread * 0.5f;
+        bird.len = 1300 + (int)(nature_rand() % 2600u);
+        bird.at = 0;
+        bird.gap = 1500 + (int)(nature_rand() % 5000u);
+      }
+    } else {
+      const float t = (float)bird.at / bird.len;
+      const float f = bird.f0 + (bird.f1 - bird.f0) * t * t;
+      bird.phase += f * 6.2832f / 32768.f;
+      if (bird.phase > 6.2832f)
+        bird.phase -= 6.2832f;
+      const float env = sinf(3.1416f * t) * bird.amp * birdsLevel * 1700.f;
+      const float v = (sinf(bird.phase) + 0.18f * sinf(bird.phase * 2.f)) * env;
+      out[0] += v * (1.f - bird.pan) * 1.4f;
+      out[1] += v * bird.pan * 1.4f;
+      bird.at++;
+    }
+  }
+  if (cricketsLevel > 0.001f)
+    for (int c = 0; c < 2; c++) {
+      crickets[c].phase += crickets[c].freq * 6.2832f / 32768.f;
+      if (crickets[c].phase > 6.2832f)
+        crickets[c].phase -= 6.2832f;
+      if (++crickets[c].at >= crickets[c].period)
+        crickets[c].at = 0;
+      const int pulse = crickets[c].at / 1100; // ~30 ms a pulse, half of it sounding
+      if (pulse < crickets[c].pulses && crickets[c].at % 1100 < 600) {
+        const float e = sinf(3.1416f * (crickets[c].at % 1100) / 600.f);
+        const float v = sinf(crickets[c].phase) * e * cricketsLevel * 1100.f;
+        out[0] += v * (1.f - crickets[c].pan);
+        out[1] += v * crickets[c].pan;
+      }
+    }
+  if (windLevel > 0.001f) {
+    if (nature_rand() % 40000u == 0)
+      windGustTo = 0.25f + (nature_rand() % 75) / 100.f;
+    windGust += (windGustTo - windGust) * 0.00004f;
+    for (int c = 0; c < 2; c++) {
+      windLp[c] += (nature_noise() - windLp[c]) * (0.01f + windGust * 0.03f);
+      windLp2[c] += (windLp[c] - windLp2[c]) * 0.05f;
+      out[c] += windLp2[c] * windLevel * windGust * 26000.f;
+    }
+  }
+}
 static void nature_mix(int16_t *buf, size_t frames) {
   const float want = natureRain == 2 ? 1.f : natureRain == 1 ? 0.6f : 0.f;
-  if (want == 0.f && rainLevel < 0.001f && thunderEnv < 0.001f && thunderIn < 0)
+  const bool life = birdsWant > 0 || cricketsWant > 0 || windWant > 0 || birdsLevel > 0.001f || cricketsLevel > 0.001f ||
+                    windLevel > 0.001f;
+  if (want == 0.f && rainLevel < 0.001f && thunderEnv < 0.001f && thunderIn < 0 && !life)
     return;
   for (size_t i = 0; i < frames; i++) {
     rainLevel += (want - rainLevel) * 0.00003f; // ~1 s to come and go
@@ -3363,6 +3531,8 @@ static void nature_mix(int16_t *buf, size_t frames) {
       const float thunder = thunderLp * thunderEnv * (0.55f + 2.2f * fabsf(thunderRumble));
       out[c] = rain * rainLevel * 8000.f + thunder * 30000.f;
     }
+    if (life)
+      nature_life(out);
     for (int c = 0; c < 2; c++) {
       const float v = buf[i * 2 + c] + out[c];
       buf[i * 2 + c] = (int16_t)(v > 32767.f ? 32767.f : v < -32768.f ? -32768.f : v);

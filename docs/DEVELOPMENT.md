@@ -4147,8 +4147,9 @@ live game's sound commands (NitroSDK's SNDCommand chains, 0x18 bytes each in mai
 with tag 7; read back from the ARM9's FIFO ring, `fifo_out.data`, after each frame, the chain still whole then) are given
 the copy too, those of a player's (ids 0-10, arg0 the player) other than the music's player 0, the copy's chain relinked
 over the kept ones; the sequence (0x2000 bytes), its bank and the bank's wave archives copied into the copy where they
-differ (the games load a sound effect into the heap as it plays). Cries (channel commands) stay silent. Origin HeartGold,
-walking into walls at 4x: the bump heard, 0.59 against the 1x sound alone (other bumps over it).
+differ (the games load a sound effect into the heap as it plays). Cries are sequences too (their bank and a 430 KB wave
+archive copied over the first time). Origin HeartGold at 4x: walking into walls, the bump heard, 0.59 against the 1x sound
+alone (other bumps over it); a Pokédex entry's cry 0.83.
 
 ## DS weather and seasons (Capsule's GBA core)
 
@@ -4191,6 +4192,13 @@ mist (5:00-9:30, thickest 6:30-7:30: 8-pixel blocks of a pale veil in drifting p
 the calendar's. And the sound of DYNAMIC WEATHER's rain (band-passed noise and drops) and each lightning's thunder 0.25-1.8 s
 later (low-passed brown noise with a slow rumble), made at 32768 Hz and mixed into the game's sound: `retro_set_audio_sample_batch`
 is the core's own, passing mGBA's sound through `nature_audio` (and FF SOUND's through `nature_mix`).
+Added since (2026-11-27): a sunrise's pink (5:15-7:15, at 6:00) and a sunset's orange (17:15-19:30, at 18:30) over the
+picture's top 3/5, fading down (`nature_glow_sky`, at most 40% at the top); the player's steps under DYNAMIC WEATHER
+(`nature_steps`: the map scrolling 8 pixels is a foot; the feet are the picture's middle, 6 pixels down, where the camera
+keeps the player): in the rain a splash (a ring and four drops, 16 frames), in the snow a footprint left on the map (carried
+with it, gone in 5 s). Heard (`nature_life`): birds on a fine morning (5:30-10:30, fewer in winter: phrases of 2-7 rising or
+falling whistles), two crickets on a summer or autumn night (20:30-4:00: 4.3 / 4.65 kHz in pulses), the wind in DYNAMIC
+WEATHER's snow (half of it in a storm: low-passed noise in slow gusts).
 
 ## Releasing
 

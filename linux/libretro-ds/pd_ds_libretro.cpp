@@ -1675,8 +1675,8 @@ RETRO_API bool retro_unserialize(const void* data,size_t n){
 // makes a new copy once it's settled (pk_nds_bgm_settle: no fade running, its player not paused); a song going (0)
 // fades the copy out. The sound effects: the game's sound commands (NitroSDK's, a chain of 0x18-byte SNDCommand in main
 // RAM, its address sent on the IPC FIFO, tag 7) for the players other than the music's (0) are given the copy's ARM7 too
-// (forward), with what they point at (the sequence, its bank and wave archives) copied over when the copy's differs. A Pokémon's cry
-// (the channels' own commands, not a player's) isn't.
+// (forward), with what they point at (the sequence, its bank and wave archives) copied over when the copy's differs. A Pokémon's cry is
+// a sequence on its own bank too (HeartGold / SoulSilver: player 3), heard the same way.
 namespace pd_ds::ffs {
 std::unique_ptr<ds::NDS> copy;
 bool on=false, playing=false, broken=false;
