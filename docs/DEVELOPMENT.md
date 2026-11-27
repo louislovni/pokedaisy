@@ -4200,6 +4200,18 @@ with it, gone in 5 s). Heard (`nature_life`): birds on a fine morning (5:30-10:3
 falling whistles), two crickets on a summer or autumn night (20:30-4:00: 4.3 / 4.65 kHz in pulses), the wind in DYNAMIC
 WEATHER's snow (half of it in a storm: low-passed noise in slow gusts).
 
+DYNAMIC WEATHER on the DS core (`pd_ds::sky`, 2026-11-27): HeartGold / SoulSilver (and their hacks) and Platinum, under
+DS WEATHER as on the GBA core. Outdoors is the map header's matrix 0 (the overworld; caves and buildings have their own),
+the zone the companion's `map`; the map headers are found in main RAM once (`find_table`: the run of 300+ 0x18-byte records
+whose day and night songs are 1000-1300; HG / SS songs at +12, matrix +4; Platinum songs +10, matrix +2; mapsec +18,
+weather +20). The game's own weather goes first (the header's, anything but 0 / 1). The sky is the GBA core's hash (12
+minutes, the mapsec), the season the calendar's. Particles: `libretro/pd_dsweather.c` (linked into the DS core) from the
+game's own cart when it's HG / SS, else the frontend's (`retro_pd_weather_cart`). Drawn on the one screen's field over the
+stage before the HUD, or with EXPAND over the whole frame in `emit` (the margins too) before the wide HUD; the clouds' dim
+and a storm's lightning the GBA core's; the rain and thunder heard (NATURE) through the core's own
+`retro_set_audio_sample_batch` (DSperate's renamed `ds_set_audio_sample_batch`). Origin HeartGold's Pallet Town: found
+at 0x020F37C4, 540 headers, zone 49 outdoors; rain and storm drawn across the expanded frame.
+
 ## Releasing
 
 See [RELEASING.md](RELEASING.md): `make bump V=x.y.z`, merge, `make release` (tags

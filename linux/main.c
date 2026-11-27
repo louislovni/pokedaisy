@@ -1940,7 +1940,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
   fx_core((int (*)(int *, int))dlsym(core.dl, "retro_pd_scene"), (int (*)(float *, int))dlsym(core.dl, "retro_pd_lights"));
   if (!dsGame)
     battle_sprites_follow(path);
-    ambience_follow(path);
+  ambience_follow(path); // every game: the DS core draws DYNAMIC WEATHER too
 #endif
 #ifdef CAPSULE_COOP
   if (!dsGame) {
