@@ -1802,8 +1802,8 @@ static void ambience_follow(const char *gamePath) {
     snprintf(dir, sizeof dir, ".");
   snprintf(roms, sizeof roms, "%s/roms", root);
   bool have = fx_find_hgss(dir, found, sizeof found) || fx_find_hgss(roms, found, sizeof found);
-  // DYNAMIC WEATHER draws HeartGold's weather too: the cart stays open for either.
-  cart(have && (hostSet.dsWeather || hostSet.dynWeather) ? found : NULL);
+  // DYNAMIC WEATHER is drawn with DS WEATHER's cart, and only while DS WEATHER is on.
+  cart(have && hostSet.dsWeather ? found : NULL);
   set(hostSet.dsWeather, hostSet.seasons);
   void (*dynamic)(int) = (void (*)(int))dlsym(core.dl, "retro_pd_dynamic_weather");
   if (dynamic)

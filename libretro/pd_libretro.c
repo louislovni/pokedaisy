@@ -3087,7 +3087,8 @@ static void amb_after_run(void) {
   const int w = snap.weather;
   const bool fine = w == 0 || w == 1 || w == 2;
   // DYNAMIC WEATHER: on a fine day the area's own sky (a season's winter brings snow); the game's weather goes first.
-  if (!gameWeather && field && fine && dsw_ready())
+  // Under DS WEATHER: turned off, no HeartGold weather is drawn at all.
+  if (ambDsWeather && !gameWeather && field && fine && dsw_ready())
     ambKind = amb_dynamic(season);
   if (field)
     amb_camera();

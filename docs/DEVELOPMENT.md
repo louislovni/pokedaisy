@@ -4170,8 +4170,8 @@ Route 111's desert.
 DYNAMIC WEATHER (`retro_pd_dynamic_weather`, Capsule's AMBIANCE page, the host's AMBIENCE page with `dyn_weather` in
 host.ini): on the game's fine days (weather 0-2) outdoors, each map section gets its own sky for each 12 minutes of the
 device's clock (`amb_dynamic`: a hash of both, 60 % fine, else rain or now and then a storm; snow in a season's winter, a
-summer's skies mostly fine), drawn with the cart's weather like DS WEATHER; the game's own weather goes first. It needs the
-cart open, so the frontends keep it while either is on.
+summer's skies mostly fine), drawn with the cart's weather, only while DS WEATHER is on (turning DS WEATHER off ends all of
+it: a player turned it off and the dynamic rain stayed); the game's own weather goes first.
 
 ## Releasing
 
