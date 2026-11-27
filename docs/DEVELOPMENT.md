@@ -4210,7 +4210,12 @@ game's own cart when it's HG / SS, else the frontend's (`retro_pd_weather_cart`)
 stage before the HUD, or with EXPAND over the whole frame in `emit` (the margins too) before the wide HUD; the clouds' dim
 and a storm's lightning the GBA core's; the rain and thunder heard (NATURE) through the core's own
 `retro_set_audio_sample_batch` (DSperate's renamed `ds_set_audio_sample_batch`). Origin HeartGold's Pallet Town: found
-at 0x020F37C4, 540 headers, zone 49 outdoors; rain and storm drawn across the expanded frame.
+at 0x020F37C4, 540 headers, zone 49 outdoors; rain and storm drawn across the expanded frame. NATURE moved to `libretro/pd_nature.c`
+(`nat_after_run` / `nat_draw` / `nat_thunder` / `nat_mix`, the target giving the plot, the map's scroll and the feet) and
+runs on the DS core too: outdoors as above, the feet at the stage's (256, 196), the scroll from HeartGold / SoulSilver's
+player MapObject (fx32 x +0x70, z +0x78 off `cart::johtoField` -> +64 avatar -> +48 object; a world unit a DS pixel), so the
+rain, the snow and the footprints keep their place while the player walks (Platinum: none, the particles move with the
+screen).
 
 ## Releasing
 

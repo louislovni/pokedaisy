@@ -47,11 +47,11 @@ extern "C" {
 #include "../hud.h"
 #include "../quick_menu.h"
 #include "pd_tables.h"
-extern "C" {
 #include "pd_dsweather.h"
-}
+#include "pd_nature.h"
 #include "pd_icon.h"
 }
+namespace cart { extern uint32_t johtoField; }
 namespace pd_ds {
 // PD_DS_PERF=1: every 300 frames, where a frame's time went (ms each): DSperate's own emulation, and PokeDaisy's
 // present split into composing the screens, the RGB565 copy (none where the frontend takes XRGB8888) and the HUD. Off,
@@ -350,7 +350,7 @@ uint32_t ambientRow(const uint32_t* thumb,unsigned W,unsigned H,unsigned Y,unsig
   return 0;
 }
 
-namespace sky { void draw(uint32_t* buf,unsigned stride,int x,int y,int w,int h,int scale); extern bool shown; }
+namespace sky { void draw(uint32_t* buf,unsigned stride,int x,int y,int w,int h,int scale,float feetX,float feetY); extern bool shown; }
 void emit(const uint32_t* px,bool field3D){
   using namespace wide;
   if(mx<=0&&my<=0){geometry(512,384);submit(px,512,384);return;}
@@ -479,7 +479,7 @@ void emit(const uint32_t* px,bool field3D){
       }
     }
   }
-  if(field3D&&sky::shown)sky::draw(out,W,0,0,int(W),int(H),2);
+  if(field3D&&sky::shown)sky::draw(out,W,0,0,int(W),int(H),2,float(X0+256),float(Y0+196));
   if(hudW==int(W/2)&&hudH>0&&unsigned(2*(hudH+hudTop))<=H){
     for(unsigned y=0;y<unsigned(2*hudH);++y){
       const uint32_t* src=hud+(y/2)*hudW;
@@ -743,13 +743,18 @@ bool field_free(){return field_free(pk_nds_field_state(game,read32,nullptr,0));}
 // (libretro/pd_dsweather.c), from this cart when it's one of them (or a hack of one), else from the one the frontend gives
 // (retro_pd_weather_cart). Outdoors: the map header's matrix is the overworld's (0); the game's own weather (the header's,
 // anything but sunny / cloudy) goes first. Drawn over the field (and EXPAND's margins), the picture dimmed under the
-// clouds, a storm's lightning flashing it; heard (NATURE): the rain and the thunder.
+// clouds, a storm's lightning flashing it; and NATURE (libretro/pd_nature.c, the GBA core's): fireflies, shooting stars,
+// mist, sunrise and sunset, steps, birds, crickets, wind, the rain and thunder heard. The map's scroll (the particles
+// keep their place, the footprints too): the player's position (HeartGold / SoulSilver's MapObject, fx32 x at +0x70,
+// z at +0x78; a world unit is a DS pixel), none on Platinum.
 namespace sky {
-bool dynamic=false, dsWeather=true, nature=true, shown=false;
+bool dynamic=false, dsWeather=true, shown=false;
 std::string cart;
 int cartState=0;              // 0 not tried, 1 open, -1 none
 uint32_t table=1;             // the map headers (0x18 bytes each), 0 not found, 1 not looked for yet
 int matOff=4, mapsecOff=18, weatherOff=20, entries=0;
+bool outdoors=false, gameClear=false;
+float camX=0, camY=0; int32_t lastX=0, lastZ=0; bool haveLast=false;
 int kind=DSW_NONE, skyNow=0, skyK=0, skyKind=1, flashAt=-1, flashFrame=0, rain=0;
 uint32_t flashSeed=0x9E3779B9u;
 unsigned frames=0;
@@ -797,33 +802,43 @@ int calendar_season(){
 // After each frame: what the sky does now.
 void update(){
   ++frames;
-  if(!dynamic||!dsWeather||!game||(companionGame!=DsGame::Johto&&companionGame!=DsGame::Platinum)){kind=DSW_NONE;skyNow=rain=0;return;}
+  if(!game||(companionGame!=DsGame::Johto&&companionGame!=DsGame::Platinum)){kind=DSW_NONE;skyNow=rain=0;outdoors=false;return;}
   const int bits=pk_nds_field_state(game,read32,nullptr,0);
   const bool field=(bits&PK_NDS_FIELD_SCREEN)&&!(bits&PK_NDS_FIELD_BATTLE);
-  if(!field){skyNow=rain=0;return;}
+  if(!field){skyNow=rain=0;haveLast=false;nat_after_run(false,false,SEASON_NONE,0,false);return;}
+  if(companionGame==DsGame::Johto){
+    const uint32_t f=read32(cart::johtoField),a=f?read32(f+64):0,o=a?read32(a+48):0;
+    if(o){
+      const int32_t x=int32_t(read32(o+0x70)),z=int32_t(read32(o+0x78));
+      const float dx=(x-lastX)/4096.f,dz=(z-lastZ)/4096.f;
+      if(haveLast&&std::fabs(dx)<16&&std::fabs(dz)<16){camX+=dx;camY+=dz;}
+      lastX=x;lastZ=z;haveLast=true;
+    }else haveLast=false;
+  }
+  nat_after_run(outdoors,outdoors&&gameClear&&kind<0,SEASON_NONE,rain,outdoors&&kind==DSW_SNOW);
   if(frames%30!=1)return;
-  if(!open_cart()){kind=DSW_NONE;return;}
   if(table==1)find_table();
+  const bool weatherOn=dynamic&&dsWeather&&open_cart();
   const int zone=ds_read_companion(nds->bus.main_ram.get(),nds->bus.main_ram_size(),companionGame).map;
-  kind=DSW_NONE;
+  kind=DSW_NONE;outdoors=gameClear=false;
   if(table>1&&zone>3&&zone<entries){
     const uint32_t h=table+uint32_t(zone)*0x18;
     const unsigned matrix=read32(h+matOff)&0xFFFF, weather=read32(h+weatherOff)&0xFF, mapsec=read32(h+mapsecOff)&0xFF;
+    outdoors=matrix==0;gameClear=weather<=1;
     if(matrix==0&&weather<=1){
       uint32_t x=uint32_t(std::time(nullptr)/(12*60))*2654435761u^mapsec*40503u;
       x^=x>>15;x*=2246822519u;x^=x>>13;
       const unsigned r=x%100u;
       const int season=calendar_season();
-      if(r>=60)
+      if(r>=60&&weatherOn)
         kind=season==SEASON_WINTER?DSW_SNOW:season==SEASON_SUMMER&&r<75?DSW_NONE:r<88?DSW_RAIN:DSW_STORM;
     }
   }
   skyNow=kind==DSW_STORM?2:kind==DSW_RAIN||kind==DSW_SNOW?1:0;
-  rain=nature&&(kind==DSW_RAIN||kind==DSW_STORM)?(kind==DSW_STORM?2:1):0;
+  rain=kind==DSW_RAIN||kind==DSW_STORM?(kind==DSW_STORM?2:1):0;
 }
-void thunder();
-// Over [w] x [h] at (x, y) of [buf]: the clouds' dim, a storm's lightning, the particles (a DS pixel [scale] wide).
-void draw(uint32_t* b,unsigned stride,int x,int y,int w,int h,int scale){
+// Over [w] x [h] at (x, y) of [buf]: the clouds' dim, a storm's lightning, the particles (a DS pixel [scale] wide), NATURE.
+void draw(uint32_t* b,unsigned stride,int x,int y,int w,int h,int scale,float feetX,float feetY){
   if(skyNow)skyKind=skyNow;
   const int want=skyNow?256:0;
   skyK+=want>skyK?2:want<skyK?-3:0;
@@ -835,7 +850,7 @@ void draw(uint32_t* b,unsigned stride,int x,int y,int w,int h,int scale){
     if(flashAt<0){flashSeed=flashSeed*1664525u+1013904223u;flashAt=240+int((flashSeed>>8)%600u);flashFrame=0;}
     if(--flashAt<=0){
       static const int FLASH[]={420,420,300,120,150,380,330,290,250,220,190,160,140,120,110,100};
-      if(flashFrame==0)thunder();
+      if(flashFrame==0)nat_thunder();
       if(flashFrame<int(std::size(FLASH))){for(int c=0;c<3;++c)mul[c]=mul[c]*FLASH[flashFrame]/100;++flashFrame;flashAt=1;}
       else flashAt=-1;
     }
@@ -850,39 +865,16 @@ void draw(uint32_t* b,unsigned stride,int x,int y,int w,int h,int scale){
         row[xx]=(r<<16)|(g<<8)|bl;
       }
     }
-  if(kind<0)return;
   buf=b;bufStride=stride;ox=x;oy=y;bw=w;bh=h;
-  const dsw_target t={plot,w,h,scale,0.f,0.f};
-  dsw_weather(kind,&t);
-}
-// The rain and thunder heard (the GBA core's nature_mix): noise at the DS's rate, mixed into the game's sound.
-uint32_t noiseSeed=0x2545F491u;
-float noise(){noiseSeed^=noiseSeed<<13;noiseSeed^=noiseSeed>>17;noiseSeed^=noiseSeed<<5;return int32_t(noiseSeed)/2147483648.f;}
-float rainLevel=0,thunderEnv=0,rumble=0,lp[2]={},bp[2]={},drop[2]={},brown[2]={},thunderLp=0;
-int thunderIn=-1;
-void thunder(){if(rain){noise();thunderIn=8000+int(noiseSeed%50000u);}}
-void mix(int16_t* io,size_t frames){
-  const float want=rain==2?1.f:rain==1?0.6f:0.f;
-  if(want==0.f&&rainLevel<0.001f&&thunderEnv<0.001f&&thunderIn<0)return;
-  for(size_t i=0;i<frames;++i){
-    rainLevel+=(want-rainLevel)*0.00003f;
-    if(thunderIn>=0&&--thunderIn<0)thunderEnv=0.7f+float(noiseSeed%30)/100.f;
-    thunderEnv*=0.99996f;
-    rumble+=(noise()-rumble)*0.0004f;
-    for(int c=0;c<2;++c){
-      lp[c]+=(noise()-lp[c])*0.35f;
-      bp[c]+=(lp[c]-bp[c])*0.04f;
-      float v=(lp[c]-bp[c])*0.55f;
-      if(noiseSeed%1400==0)drop[c]+=noise()*3.f;
-      drop[c]*=0.93f;
-      v+=drop[c]*0.25f;
-      brown[c]=brown[c]*0.996f+noise()*0.06f;
-      thunderLp+=(brown[c]-thunderLp)*0.02f;
-      const float out=v*rainLevel*8000.f+thunderLp*thunderEnv*(0.55f+2.2f*std::fabs(rumble))*30000.f+io[i*2+c];
-      io[i*2+c]=int16_t(std::clamp(out,-32768.f,32767.f));
-    }
+  if(kind>=0){
+    const dsw_target t={plot,w,h,scale,camX,camY};
+    dsw_weather(kind,&t);
   }
+  const nat_target n={plot,w,h,scale,camX*scale,camY*scale,feetX-x,feetY-y};
+  nat_draw(&n);
+  camX=camY=0;
 }
+// The game's sound with NATURE's mixed in (the DS's rate is 32728.5 Hz, near enough NATURE's 32768).
 retro_audio_sample_batch_t out=nullptr;
 size_t audio(const int16_t* data,size_t frames){
   if(!out)return frames;
@@ -890,7 +882,7 @@ size_t audio(const int16_t* data,size_t frames){
   for(size_t done=0;done<frames;){
     const size_t n=std::min<size_t>(frames-done,4096);
     std::memcpy(mixed,data+done*2,n*4);
-    mix(mixed,n);
+    nat_mix(mixed,n);
     out(mixed,n);
     done+=n;
   }
@@ -1301,7 +1293,7 @@ void present_frame(const void* data) {
   // DYNAMIC WEATHER on the one screen's field (EXPAND draws it in emit, past the screen's edges too).
   sky::shown=game && arrangement.top.x==0 && arrangement.top.y==0 && arrangement.top.w==512 && arrangement.top.h==384 &&
     arrangement.touch.w==0 && !arrangement.floating && !arrangement.modal && !battleActive && !wasInBattle && !scene.dark;
-  if(sky::shown && wide::mx<=0 && wide::my<=0)sky::draw(stage,512,0,0,512,384,2);
+  if(sky::shown && wide::mx<=0 && wide::my<=0)sky::draw(stage,512,0,0,512,384,2,256.f,196.f);
   const double h0=perfOn?perf_now():0;
   if(hudCursor<0&&(buttons&(1u<<RETRO_DEVICE_ID_JOYPAD_SELECT))&&arrangement.touch.w>0){
     int cx=arrangement.touch.x+cursor_x*arrangement.touch.w/256;
@@ -2016,7 +2008,7 @@ RETRO_API void retro_pd_weather_cart(const char* ndsPath){
   const std::string path=ndsPath?ndsPath:"";
   if(path!=pd_ds::sky::cart){pd_ds::sky::cart=path;if(pd_ds::sky::cartState<0)pd_ds::sky::cartState=0;}
 }
-RETRO_API void retro_pd_nature(int on){pd_ds::sky::nature=on!=0;}
+RETRO_API void retro_pd_nature(int on){nat_set_on(on!=0);}
 RETRO_API void retro_pd_ambience(int dsWeather,int){pd_ds::sky::dsWeather=dsWeather!=0;}
 RETRO_API int retro_pd_ff_audio(int16_t* out,int maxFrames){
   return pd_ds::ffs::on?pd_ds::ffs::audio(out,maxFrames):0;
