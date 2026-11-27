@@ -1859,7 +1859,21 @@ void same_memory(uint32_t a,uint32_t len){
   if(logOn)std::fprintf(stderr,"[ffs] copy %08x+%x\n",a,len);
   for(uint32_t o=0;o<len;o+=4)to.dma_write32(ds::Cpu::ARM9,a+o,from.dma_read32(ds::Cpu::ARM9,a+o));
 }
-// The game's sound commands sent this frame, the music's dropped, given the copy.
+// The NitroSDK file at [a] ("SSEQ", "SBNK", "SWAR": its size at +8) made the copy's too, exactly its own bytes: never past
+// its end, where the copy's music may be (a window past it put another file's bytes over the song: wrong notes).
+void same_file(uint32_t a,const char* magic){
+  if(a<0x02000000 || a>=0x023FFFF0)return;
+  const uint32_t m=nds->bus.dma_read32(ds::Cpu::ARM9,a);
+  if(std::memcmp(&m,magic,4))return;
+  const uint32_t size=nds->bus.dma_read32(ds::Cpu::ARM9,a+8);
+  if(size>=0x10 && size<=0x200000)same_memory(a,(size+3)&~3u);
+}
+unsigned realFrames=0;                 // audio()'s: the frames of real time heard
+struct Recent{uint32_t seq;unsigned at;} recent[8];
+// The game's sound commands sent this frame, the music's dropped, given the copy. Not while the copy's song isn't the
+// game's (a new one settling, the old fading: the game's heap holds the new one's files where the copy's song still
+// plays); and the same sound effect again within 8 frames of real time is left out (4x's footsteps, a cursor run
+// through a list: a sound 4 times as often, each over the last).
 void forward(){
   const uint32_t now=pushed();
   const auto& f=nds->io.cpu_io[0].fifo_out;
@@ -1868,24 +1882,32 @@ void forward(){
     if((v&31)!=7 || (v>>6)<0x100000)continue;
     uint32_t p=0x02000000|((v>>6)&0xFFFFFF), first=0, last=0;
     auto& b=nds->bus;
+    uint32_t skipped=0;   // the players whose sound is left out of this chain
     for(int n=0;n<64 && p>=0x02000000 && p<0x023FFFE8;++n){
       const uint32_t next=b.dma_read32(ds::Cpu::ARM9,p), id=b.dma_read32(ds::Cpu::ARM9,p+4), a0=b.dma_read32(ds::Cpu::ARM9,p+8);
-      if(id<=10 && (a0&0xFF)!=0 && (a0&0xFF)<16){   // a player's (START_SEQ .. PLAYER_LOCAL_VAR), not the music's
+      const unsigned player=a0&0xFF;
+      if(id<=10 && player!=0 && player<16 && (id==0 || id==2)){
+        const uint32_t seq=b.dma_read32(ds::Cpu::ARM9,p+12);
+        bool again=false;
+        for(auto& r:recent)again|=r.seq==seq && realFrames-r.at<8;
+        if(again)skipped|=1u<<player;
+        else{
+          Recent* oldest=&recent[0];
+          for(auto& r:recent)if(r.at<oldest->at)oldest=&r;
+          *oldest={seq,realFrames};
+        }
+      }
+      if(id<=10 && player!=0 && player<16 && !(skipped&(1u<<player))){   // a player's (START_SEQ .. PLAYER_LOCAL_VAR), not the music's
         for(uint32_t o=4;o<0x18;o+=4)copy->bus.dma_write32(ds::Cpu::ARM9,p+o,b.dma_read32(ds::Cpu::ARM9,p+o));
         copy->bus.dma_write32(ds::Cpu::ARM9,p,0);
         if(last)copy->bus.dma_write32(ds::Cpu::ARM9,last,p);else first=p;
         last=p;
-        if(id==0 || id==2){                        // the sequence and its bank
-          same_memory(b.dma_read32(ds::Cpu::ARM9,p+12),0x2000);
+        if(id==0 || id==2){                        // the sequence (its SSEQ: the data is 0x1C in), its bank, the bank's wave archives
+          same_file(b.dma_read32(ds::Cpu::ARM9,p+12)-0x1C,"SSEQ");
           const uint32_t bank=b.dma_read32(ds::Cpu::ARM9,p+20);
-          same_memory(bank,0x400);
+          same_file(bank,"SBNK");
           if(bank>=0x02000000 && bank<0x023FFFE0)
-            for(uint32_t w=0;w<4;++w){                // the bank's wave archives (SNDBankData.waveArcLink), whole
-              const uint32_t arc=b.dma_read32(ds::Cpu::ARM9,bank+0x18+w*8);
-              if(arc<0x02000000 || arc>=0x023FFFF0)continue;
-              const uint32_t size=b.dma_read32(ds::Cpu::ARM9,arc+8);
-              if(size>=0x20 && size<=0x100000)same_memory(arc,(size+3)&~3u);
-            }
+            for(uint32_t w=0;w<4;++w)same_file(b.dma_read32(ds::Cpu::ARM9,bank+0x18+w*8),"SWAR");   // SNDBankData.waveArcLink
         }
         if(logOn)std::fprintf(stderr,"[ffs] cmd %u player %u %08x %08x %08x\n",id,a0,b.dma_read32(ds::Cpu::ARM9,p+12),b.dma_read32(ds::Cpu::ARM9,p+16),b.dma_read32(ds::Cpu::ARM9,p+20));
       }
@@ -1947,7 +1969,8 @@ bool begin(){
 void live_frame(){
   const int now=current_bgm();
   if(now<0)return;
-  if(playing)forward();
+  if(playing && waitFrames<0 && gainStep==0.f && now==bgm)forward();
+  else pushSeen=pushed();   // what's sent meanwhile isn't given later
   const int settle=pk_nds_bgm_settle(game,read32);
   if(settle!=stateSeen){stateSeen=settle;stateFrames=0;}else ++stateFrames;
   const bool settled=settle>=0 && stateFrames>=SETTLE;
@@ -1976,6 +1999,7 @@ int audio(int16_t* out,int maxFrames){
   const uint16_t flag=n.bus.read16(ds::Cpu::ARM7,0x027FFF96);
   if(flag&1)n.bus.write16(ds::Cpu::ARM7,0x027FFF96,flag&~1);
   n.gpu.set_frame_skip(true);
+  ++realFrames;
   n.run_frame();
   const int got=int(n.spu.take(out,size_t(maxFrames)));
   if(gainStep>0.f || gain<1.f){

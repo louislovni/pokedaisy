@@ -4153,8 +4153,10 @@ once a new song settles). Checked on Chaos Purple's Pallet Town: 0.98 against th
 live game's sound commands (NitroSDK's SNDCommand chains, 0x18 bytes each in main RAM, their address sent on the IPC FIFO
 with tag 7; read back from the ARM9's FIFO ring, `fifo_out.data`, after each frame, the chain still whole then) are given
 the copy too, those of a player's (ids 0-10, arg0 the player) other than the music's player 0, the copy's chain relinked
-over the kept ones; the sequence (0x2000 bytes), its bank and the bank's wave archives copied into the copy where they
-differ (the games load a sound effect into the heap as it plays). Cries are sequences too (their bank and a 430 KB wave
+over the kept ones; the sequence's SSEQ file, its SBNK and the bank's SWARs copied into the copy where they differ, each
+exactly its own size (a fixed 8 KB window past a small SSEQ put other files' bytes over the copy's song: wrong notes,
+Origin HeartGold, a player's report); none while the copy's song isn't the game's (settling, fading), and the same
+sequence again within 8 frames of real time left out (4x: each sound 4 times as often, over itself) (the games load a sound effect into the heap as it plays). Cries are sequences too (their bank and a 430 KB wave
 archive copied over the first time). Origin HeartGold at 4x: walking into walls, the bump heard, 0.59 against the 1x sound
 alone (other bumps over it); a Pokédex entry's cry 0.83.
 
