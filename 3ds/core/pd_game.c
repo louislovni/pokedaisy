@@ -9,6 +9,8 @@
 #include "pd_games.h"
 #include "pd_randomized.h"
 #include "pd_sha1.h"
+#include "pd_snapshot.h"
+#include "pd_tables.h"
 
 // The configs come from gamedata/ (gamedata/targets/3ds.toml picks the fields
 // this port reads), generated with the app's: `make gamedata`.
@@ -615,6 +617,99 @@ static const struct known_rom KNOWN_ROMS[] = {
     {NULL, NULL, PD_GAME_NONE, NULL, PD_GUIDE_NONE},
 };
 
+// ---- Pokémon Éclat Pourpre V2.0.0 ----
+// Mickey's French hack, built on the *French* FireRed (BPRF rev 0, its header changed to BPRE): BPRF's RAM and code, its
+// data tables repointed and grown (980 species to the Gen 7 ones and forms, Fairy as type 23, 430 items). The tables were
+// found by the literal pools: each word that held a French FireRed table's address holds the hack's at the same place
+// (the code didn't move). Its names, moves and types are read from the ROM as it loads (nothing bundled). No DEX (its
+// Pokédex is its own) or GUIDE (its own region). Unverified on a save.
+#define ECLAT_SHA1 "ba1136e01c10ec29afdceb91276548c1c1c04fe7"
+enum { ECLAT_SPECIES = 980, ECLAT_ITEMS = 430, ECLAT_MOVES = 410, ECLAT_TYPES = 24 };
+static struct pd_config eclatCfg;
+static struct pd_text eclatText;
+static const char* eclatSpecies[ECLAT_SPECIES];
+static char eclatSpeciesText[ECLAT_SPECIES][24];
+static const char* eclatItems[ECLAT_ITEMS];
+static char eclatItemText[ECLAT_ITEMS][32];
+static struct pd_move_info eclatMoves[ECLAT_MOVES];
+static char eclatMoveText[ECLAT_MOVES][28];
+static uint8_t eclatTypes[ECLAT_SPECIES][2];
+static uint8_t eclatGender[ECLAT_SPECIES];
+static const char* eclatTypeNames[ECLAT_TYPES];
+static struct pd_type_pair eclatChart[128];
+
+static bool eclat_build(const struct pd_game* g) {
+    // gSpeciesNames (11), gBaseStats (28: types at 6, gender at 16), gItems (44: the name first), gBattleMoves (12:
+    // power at 1, type at 2), gMoveNames (13).
+    const uint32_t names = 0xB24900, base = 0xB35500, items = 0xBA8F00, moves = 0xBEAA00, moveNames = 0xBEBD40;
+    if (!g->rom || g->romSize < 0x2000000) return false;
+    const uint8_t* r = g->rom;
+    for (int i = 0; i < ECLAT_SPECIES; i++) {
+        pd_gen3_text(r + names + i * 11, 11, eclatSpeciesText[i], sizeof eclatSpeciesText[i]);
+        eclatSpecies[i] = i && eclatSpeciesText[i][0] ? eclatSpeciesText[i] : NULL;
+        eclatTypes[i][0] = r[base + i * 28 + 6];
+        eclatTypes[i][1] = r[base + i * 28 + 7];
+        eclatGender[i] = r[base + i * 28 + 16];
+    }
+    for (int i = 0; i < ECLAT_ITEMS; i++) {
+        pd_gen3_text(r + items + i * 44, 14, eclatItemText[i], sizeof eclatItemText[i]);
+        eclatItems[i] = i && eclatItemText[i][0] ? eclatItemText[i] : NULL;
+    }
+    for (int i = 0; i < ECLAT_MOVES; i++) {
+        pd_gen3_text(r + moveNames + i * 13, 13, eclatMoveText[i], sizeof eclatMoveText[i]);
+        eclatMoves[i].name = i && eclatMoveText[i][0] ? eclatMoveText[i] : NULL;
+        eclatMoves[i].power = r[moves + i * 12 + 1];
+        eclatMoves[i].type = r[moves + i * 12 + 2];
+    }
+    // Retail's names and chart, Fairy (23) added with its Gen 6 matchups.
+    for (int i = 0; i < ECLAT_TYPES; i++) eclatTypeNames[i] = i < pd_type_names_count ? pd_type_names[i] : "";
+    eclatTypeNames[23] = "Fairy";
+    int n = 0;
+    for (int i = 0; i < pd_type_chart_count && n < 110; i++) eclatChart[n++] = pd_type_chart[i];
+    static const struct pd_type_pair FAIRY[] = {
+        {23, 1, 200}, {23, 16, 200}, {23, 17, 200}, {23, 10, 50}, {23, 3, 50}, {23, 8, 50},
+        {1, 23, 50}, {6, 23, 50}, {17, 23, 50}, {16, 23, 0}, {3, 23, 200}, {8, 23, 200},
+    };
+    for (size_t i = 0; i < sizeof FAIRY / sizeof *FAIRY; i++) eclatChart[n++] = FAIRY[i];
+    eclatText = pd_text_port_bprf0;
+    eclatText.species = eclatSpecies;
+    eclatText.speciesCount = ECLAT_SPECIES;
+    eclatText.items = eclatItems;
+    eclatText.itemsCount = ECLAT_ITEMS;
+    eclatText.moves = eclatMoves;
+    eclatText.movesCount = ECLAT_MOVES;
+    eclatText.typeNames = eclatTypeNames;
+    eclatText.typeNamesCount = ECLAT_TYPES;
+    eclatText.typeChart = eclatChart;
+    eclatText.typeChartCount = n;
+    eclatText.speciesTypes = (const uint8_t(*)[2]) eclatTypes;
+    eclatText.speciesTypesCount = ECLAT_SPECIES;
+    eclatText.genderRatios = eclatGender;
+    eclatText.genderRatiosCount = ECLAT_SPECIES;
+    // French FireRed's config, the hack's tables where they moved.
+    eclatCfg = PD_CONFIG_PORT_BPRF0;
+    eclatCfg.text = &eclatText;
+    static const struct pd_item_descs descs = { .base = 0x08BA8F00, .stride = 44, .descOff = 20, .idOff = 14 };
+    eclatCfg.itemDescs = &descs;
+    eclatCfg.speciesCount = ECLAT_SPECIES;
+    eclatCfg.dexSpeciesCount = ECLAT_SPECIES;
+    eclatCfg.monIconTable = 0x088B7900;
+    eclatCfg.monIconPaletteIndices = 0x08801400;
+    eclatCfg.itemIconTable = 0x08AA3600;
+    eclatCfg.monPalettes = eclatCfg.dexPalettes = eclatCfg.palettes = 0x08B31600;
+    eclatCfg.speciesInfo = 0x08B35500;
+    eclatCfg.abilityNames = 0x08B88800;
+    eclatCfg.speciesToNational = 0x08865500;
+    eclatCfg.frontPics = 0x08923400;
+    eclatCfg.learnsets = 0x08885F00;
+    eclatCfg.dexEvolutions = 0x08B72600;
+    eclatCfg.dexTmhm = 0x08B45300;
+    eclatCfg.wildHeaders = 0x0896A550;
+    eclatCfg.dexEntries = 0;              // no DEX: its Pokédex is the hack's own
+    eclatCfg.handleInputChooseAction = 0; // its action menu's code was changed
+    return true;
+}
+
 static bool retail_dump(const struct pd_game* g) {
     for (size_t i = 0; i < sizeof RETAIL_DUMPS / sizeof *RETAIL_DUMPS; i++) {
         const struct retail_dump* d = &RETAIL_DUMPS[i];
@@ -692,6 +787,16 @@ static void identify(struct pd_game* g) {
             gb_font(g, r->cfg);
             return;
         }
+        return;
+    }
+    if (!strcmp(g->sha1, ECLAT_SHA1) && eclat_build(g)) {
+        g->cfg = &eclatCfg;
+        g->kind = PD_GAME_FIRERED;
+        g->title = "Pokémon Éclat Pourpre";
+        g->guide = PD_GUIDE_NONE;
+        g->hackMaps = false;
+        g->unsupported = NULL;
+        g->language = 'F';
         return;
     }
     for (const struct known_rom* k = KNOWN_ROMS; k->sha1; k++) {

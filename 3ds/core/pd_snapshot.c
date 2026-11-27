@@ -45,9 +45,14 @@ static const char* gen3_char(uint8_t c) {
     if (c >= 0xBB && c <= 0xD4) { one[0] = (char) ('A' + c - 0xBB); one[1] = 0; return one; }
     if (c >= 0xD5 && c <= 0xEE) { one[0] = (char) ('a' + c - 0xD5); one[1] = 0; return one; }
     if (c >= 0xA1 && c <= 0xAA) { one[0] = (char) ('0' + c - 0xA1); one[1] = 0; return one; }
+    // The Western games' accented capitals and small letters (0x01-0x2B: French, German, Spanish, Italian text).
+    static const char* const ACCENTED[0x2C] = {
+        0, "À", "Á", "Â", "Ç", "È", "É", "Ê", "Ë", "Ì", 0, "Î", "Ï", "Ò", "Ó", "Ô", "Œ", "Ù", "Ú", "Û", "Ñ", "ß", "à",
+        "á", 0, "ç", "è", "é", "ê", "ë", "ì", 0, "î", "ï", "ò", "ó", "ô", "œ", "ù", "ú", "û", "ñ", "º", "ª",
+    };
+    if (c >= 0x01 && c < 0x2C && ACCENTED[c]) return ACCENTED[c];
     switch (c) {
     case 0x00: return " ";
-    case 0x1B: return "é";
     case 0xAB: return "!";
     case 0xAC: return "?";
     case 0xAD: return ".";

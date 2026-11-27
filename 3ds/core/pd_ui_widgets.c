@@ -112,6 +112,8 @@ uint32_t ui_type_color(int type) {
         0x68A090, 0xF08030, 0x6890F0, 0x78C850, 0xF8D030, 0xF85888, 0x98D8D8, 0x7038F8, 0x705848,
     };
     if (type == 9 && pd_type_fairy9) return 0xEE99AC;
+    // A hack's own Fairy past the 18 (Éclat Pourpre's 23), by its type names.
+    if (type >= 18 && !strcmp(pd_type_name(ui_game, type), "Fairy")) return 0xEE99AC;
     return type >= 0 && type < 18 ? COLORS[type] : PD_MUTED;
 }
 
