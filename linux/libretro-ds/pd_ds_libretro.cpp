@@ -93,6 +93,12 @@ DsMapArt map;
 std::vector<std::vector<uint32_t>> icons,hudItemIcons;
 int repelFull=0;
 hud_hits hudHits{};
+// Where the HUD's canvas lies on the frame (frame pixels per HUD pixel, its corner), for a finger on it.
+struct {double x0=0,y0=0,sx=2,sy=2;} hudPlace;
+// A finger that went down on one of the HUD's parts (its hud id, -1 none) and the part it's on now: the part opens when
+// it's lifted there, and the touch never reaches the game.
+int hudTouchId=-1,hudTouchNow=-1;
+bool hudTouchDown=false;
 int hudCursor=-1;
 unsigned hudConsumed=0;
 // The field HUD's own 256x192 picture, kept between frames: what it shows comes from the snapshot (read every 12th
@@ -1149,6 +1155,8 @@ void present_frame(const void* data) {
     const bool wideHud=(wide::mx>0||wide::my>0) && top.x==0 && top.y==0 && top.w==512 && top.h==384 && arrangement.touch.w==0;
     const int hudW=wideHud?256+2*wide::mx:256,hudH=wideHud?192+wide::myT+wide::clearBelow-wide::hudTop:192;
     const int hudRight=wideHud?hudW:pip?(arrangement.touch.x-top.x)*256/top.w:256;
+    if(wideHud)hudPlace={0,2.0*wide::hudTop,2,2};
+    else hudPlace={2.0*wide::mx+top.x,2.0*wide::myT+top.y,top.w/256.0,top.h/192.0};
     // Inputs outside the key (icon art loaded late, the snapshot) catch up at refresh(), every 12 frames.
     HudLayerKey key;
     // Whole objects, padding too (memcmp below): the settings are one object, never copied member by member.
@@ -1175,7 +1183,8 @@ void present_frame(const void* data) {
     if(!steps)repelFull=0;
     else if(steps>repelFull)repelFull=hud_repel_full(steps);
     const auto encounters=ds_guide_here(snapshot,soulSilver);
-    int wild=encounters.count ? 0 : -1;
+    // No WILD for the hg-engine hacks: HeartGold's guide isn't their world.
+    int wild=encounters.count && !ds_origin() ? 0 : -1;
     if(wild>=0){
       bool counted[650]{};
       for(int i=0;i<encounters.count;++i){
@@ -1297,6 +1306,7 @@ int16_t filtered_input(unsigned p,unsigned d,unsigned i,unsigned id) {
   // DSperate expects a pointer over stacked screens. Reproject the current
   // layout into that convention before its input::apply receives it.
   if(d==RETRO_DEVICE_POINTER) {
+    if(hudTouchId>=0)return 0; // a finger on the HUD: its own, not the touch screen's
     bool stylus=buttons&(1u<<RETRO_DEVICE_ID_JOYPAD_SELECT);
     if(stylus) {
       if(id==RETRO_DEVICE_ID_POINTER_PRESSED)return !!(buttons&(1u<<RETRO_DEVICE_ID_JOYPAD_A));
@@ -1366,6 +1376,27 @@ void controls() {
   if(flyJob.active()){
     if(hit(RETRO_DEVICE_ID_JOYPAD_B))flyJob={};
     return;
+  }
+  // A tap on the HUD (its party, minimap, bag, PC, WILD, the companion's arrow) opens that part, as on a GBA game.
+  {
+    const bool down=input(0,RETRO_DEVICE_POINTER,0,RETRO_DEVICE_ID_POINTER_PRESSED)!=0;
+    if(down){
+      const double fx=(input(0,RETRO_DEVICE_POINTER,0,RETRO_DEVICE_ID_POINTER_X)+32767)*double(wide::outW)/65535;
+      const double fy=(input(0,RETRO_DEVICE_POINTER,0,RETRO_DEVICE_ID_POINTER_Y)+32767)*double(wide::outH)/65535;
+      const double hx=(fx-hudPlace.x0)/hudPlace.sx,hy=(fy-hudPlace.y0)/hudPlace.sy;
+      hudTouchNow=-1;
+      if(!companion && !quickOpen && hudCursor<0)
+        for(int i=0;i<hudHits.n;++i){
+          const auto& a=hudHits.at[i];
+          if(hx>=a.x && hx<a.x+a.w && hy>=a.y && hy<a.y+a.h){hudTouchNow=a.id;break;}
+        }
+      if(!hudTouchDown)hudTouchId=hudTouchNow;
+    }else if(hudTouchDown && hudTouchId>=0){
+      const int id=hudTouchId;
+      hudTouchId=-1;
+      if(id==hudTouchNow && !companion && !quickOpen){hudTouchDown=false;hud_open_target(id);return;}
+    }else hudTouchId=-1;
+    hudTouchDown=down;
   }
   const int hudButton=shell.hud_id();
   if(hudCursor>=0){
