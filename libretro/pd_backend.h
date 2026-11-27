@@ -19,6 +19,9 @@
 #define retro_unserialize mgba_retro_unserialize
 #define retro_reset mgba_retro_reset
 #define retro_load_game_special mgba_retro_load_game_special
+#ifndef PD_ARMGBA
+#define retro_set_audio_sample_batch mgba_retro_set_audio_sample_batch /* the sound passes pd_libretro.c (NATURE) */
+#endif
 /* (The prefix is mGBA's for both: it is the name pd_libretro.c calls them by.) */
 
 #include "libretro.c"
@@ -34,6 +37,7 @@
 #undef retro_unserialize
 #undef retro_reset
 #undef retro_load_game_special
+#undef retro_set_audio_sample_batch
 
 #ifndef PD_ARMGBA
 

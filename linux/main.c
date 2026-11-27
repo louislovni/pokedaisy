@@ -504,7 +504,8 @@ static struct {
                       // calendar's, 3-6 always spring / summer / autumn / winter, 7 every 20 minutes of play, 8 by area
   bool follower;      // FOLLOWER (Capsule's build): the party's lead walks behind, HeartGold / SoulSilver's own sprite
   bool dynWeather;    // DYNAMIC WEATHER (Capsule's build): rain, storms, a winter's snow come and go on fine days
-} hostSet = {0, false, false, false, {R2, L2, -1, -1}, {R2, L2, -1, -1}, SELECT, true, 0, true, true, true, 1, true, true};
+  bool nature;        // NATURE (Capsule's build): fireflies, shooting stars, morning mist, the rain and thunder heard
+} hostSet = {0, false, false, false, {R2, L2, -1, -1}, {R2, L2, -1, -1}, SELECT, true, 0, true, true, true, 1, true, true, true};
 static char hostIni[PATH_MAX];
 /* A DS game's L2 / R2 are its companion and screen buttons: with no modifier held for them, its FAST FORWARD and REWIND
  * go back to the stick clicks (R3 / L3), and come back to R2 / L2 when a modifier is picked again. */
@@ -551,6 +552,8 @@ static void host_load(void) {
       hostSet.dsWeather = v != 0;
     if (sscanf(line, "dyn_weather=%d", &v) == 1)
       hostSet.dynWeather = v != 0;
+    if (sscanf(line, "nature=%d", &v) == 1)
+      hostSet.nature = v != 0;
     if (sscanf(line, "follower=%d", &v) == 1)
       hostSet.follower = v != 0;
     if (sscanf(line, "seasons=%d", &v) == 1)
@@ -599,9 +602,9 @@ static void host_save(void) {
     return;
   fprintf(f, "ff_speed=%d\nrewind=%d\nlcd=%d\nswap_ab=%d\ncapsule_frame=%d\n", hostSet.ffSpeed, hostSet.rewind, hostSet.lcd,
           hostSet.swapAB, hostSet.capsuleFrame);
-  fprintf(f, "look=%d\nweather_fx=%d\nbattle_sprites=%d\nds_weather=%d\nseasons=%d\nfollower=%d\ndyn_weather=%d\n",
+  fprintf(f, "look=%d\nweather_fx=%d\nbattle_sprites=%d\nds_weather=%d\nseasons=%d\nfollower=%d\ndyn_weather=%d\nnature=%d\n",
           hostSet.look, hostSet.weatherFx, hostSet.battleSprites, hostSet.dsWeather, hostSet.seasons, hostSet.follower,
-          hostSet.dynWeather);
+          hostSet.dynWeather, hostSet.nature);
   for (int i = 0; i < KB_BINDS; i++)
     if (kbBinds[i].key != kbBinds[i].def)
       fprintf(f, "kb_%s=%s\n", kbBinds[i].id, SDL_GetKeyName(kbBinds[i].key));
@@ -1642,7 +1645,7 @@ static bool ds_running(void) { return running != 0; }
 enum { M_RESUME, M_SAVE, M_LOAD, M_HISTORY, M_COOP, M_KEYS, M_HOTKEYS, M_REWIND, M_FFSPEED, M_LOOK, M_AMBIENCE, M_SPRITES,
        M_LCD, M_FRAME, M_SWAP, M_QUIT,
        // AMBIANCE's page (Capsule's build): its own rows, not the main list's
-       M_WEATHER, M_DYNWEATHER, M_DSWEATHER, M_SEASONS, M_FOLLOWER, M_COUNT };
+       M_WEATHER, M_DYNWEATHER, M_DSWEATHER, M_NATURE, M_SEASONS, M_FOLLOWER, M_COUNT };
 /* SAVE HISTORY (the host menu, Capsule's build): the save's backups to go back to, newest first, by date. A pick asks
  * first; then the game closes (its progress written and backed up like any other, so going back can be undone), the
  * backup becomes the save and the game opens again on it. */
@@ -1808,6 +1811,9 @@ static void ambience_follow(const char *gamePath) {
   void (*dynamic)(int) = (void (*)(int))dlsym(core.dl, "retro_pd_dynamic_weather");
   if (dynamic)
     dynamic(hostSet.dynWeather);
+  void (*nature)(int) = (void (*)(int))dlsym(core.dl, "retro_pd_nature");
+  if (nature)
+    nature(hostSet.nature);
   void (*follow)(const char *) = (void (*)(const char *))dlsym(core.dl, "retro_pd_follower");
   if (follow)
     follow(have && hostSet.follower ? found : NULL);
@@ -1959,7 +1965,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
   static const char *const hkNames[HK_ACTIONS] = {"FAST FORWARD", "REWIND", "SAVE STATE", "LOAD STATE"};
   bool hkPage = false, histPage = false, coopPage = false, kbPage = false, ambPage = false;
   struct pd_menu ambMenu;
-  const char *ambPtrs[5];
+  const char *ambPtrs[6];
   struct pd_menu histMenu, coopMenu, kbMenu;
   notice(pd_tr("F1: KEYS   ESC: MENU"));
 #ifdef CAPSULE_COOP
@@ -2023,8 +2029,9 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
     snprintf(rows[M_SEASONS], 40, "%s  %s", pd_tr("SEASONS"), pd_tr(SEASON_NAMES[hostSet.seasons % 9]));
     snprintf(rows[M_DYNWEATHER], 40, "%s  %s", pd_tr("DYNAMIC WEATHER"), ONOFF(hostSet.dynWeather));
     snprintf(rows[M_AMBIENCE], 40, "%s", pd_tr("AMBIENCE"));
-    static const int AMB_ROWS[] = {M_WEATHER, M_DYNWEATHER, M_DSWEATHER, M_SEASONS, M_FOLLOWER};
-    for (int i = 0; i < 5; i++)
+    snprintf(rows[M_NATURE], 40, "%s  %s", pd_tr("NATURE"), ONOFF(hostSet.nature));
+    static const int AMB_ROWS[] = {M_WEATHER, M_DSWEATHER, M_DYNWEATHER, M_NATURE, M_SEASONS, M_FOLLOWER};
+    for (int i = 0; i < 6; i++)
       ambPtrs[i] = rows[AMB_ROWS[i]];
     snprintf(rows[M_SWAP], 40, "%s  %s", pd_tr("CONTROLLER A/B"), pd_tr(hostSet.swapAB ? "SWAPPED" : "NORMAL"));
     snprintf(rows[M_HOTKEYS], 40, "%s", pd_tr("CONTROLLER HOTKEYS"));
@@ -2233,12 +2240,15 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
           hostSet.weatherFx = !hostSet.weatherFx;
           break;
         case 1:
-          hostSet.dynWeather = !hostSet.dynWeather;
-          break;
-        case 2:
           hostSet.dsWeather = !hostSet.dsWeather;
           break;
-        case 3: {
+        case 2:
+          hostSet.dynWeather = !hostSet.dynWeather;
+          break;
+        case 3:
+          hostSet.nature = !hostSet.nature;
+          break;
+        case 4: {
           // The order: off, Black / White, the calendar, every 20 minutes, by area, then each season.
           static const int NEXT[9] = {1, 2, 7, 4, 5, 6, 0, 8, 3};
           hostSet.seasons = NEXT[hostSet.seasons % 9];
@@ -2368,7 +2378,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
           break;
         case M_AMBIENCE:
           ambPage = true;
-          pd_menu_init(&ambMenu, pd_tr("AMBIENCE"), ambPtrs, 5);
+          pd_menu_init(&ambMenu, pd_tr("AMBIENCE"), ambPtrs, 6);
           ambMenu.overlay = true;
           break;
         case M_HOTKEYS:

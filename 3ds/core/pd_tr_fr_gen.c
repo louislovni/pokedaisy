@@ -1195,7 +1195,7 @@ const struct pd_tr_entry pd_tr_fr[2504] = {
     { "NAME", "NOM" },
     { "NATIONAL", "NATIONAL" },
     { "NATIONAL DEX", "DEX NATIONAL" },
-    { "NATURE", "NATURE" },
+    { "NATURE", "NATURE VIVANTE" },
     { "NEARBY", "PROCHE" },
     { "NEARBY RANGE", "PORTÉE" },
     { "NEUTRAL", "NEUTRE" },

@@ -710,8 +710,12 @@ RETRO_API bool retro_pd_ff_sound(bool on) {
   return ffsState == 1;
 }
 /** One frame of real time's FF sound (stereo, the core's own rate): the frames written into [out], 0 = none. */
+static void nature_mix(int16_t *buf, size_t frames);
 RETRO_API int retro_pd_ff_audio(int16_t *out, int maxFrames) {
-  return ffsOn && ffsState == 1 ? ffs_play(core, out, maxFrames) : 0;
+  const int n = ffsOn && ffsState == 1 ? ffs_play(core, out, maxFrames) : 0;
+  if (n > 0)
+    nature_mix(out, (size_t)n); // the rain heard through FF too
+  return n;
 }
 #define FFS_JUMP() ffs_reset()
 #define FFS_FRAME()                                                                                                    \
@@ -1133,6 +1137,7 @@ static void bs_after_run(void);
 static void bs_draw(void);
 static void amb_after_run(void);
 static void amb_draw(void);
+static void nature_after_run(bool outdoors, bool clear, int season, int rain);
 static int ambKind, ambSeasonDrawn; /* DS WEATHER and SEASONS (below) */
 static bool bs_wanted(void);
 static void canvas_update(bool notify) {
@@ -1602,6 +1607,7 @@ static int dayTint[3] = {256, 256, 256};
  * same), a storm darker, and a storm's lightning flashes it now and then (a bright flash, a moment's dark, a second one,
  * then back over a few frames). Only the weather it brings: the games darken and flash for their own. */
 static int ambSky, skyK, skyKind = 1, flashAt = -1, flashFrame;
+static void nature_thunder(void);
 static uint32_t flashSeed = 0x9E3779B9u;
 static void day_night_sky(int out[3]) {
   if (ambSky) skyKind = ambSky;
@@ -1626,6 +1632,8 @@ static void day_night_sky(int out[3]) {
     return;
   static const int FLASH[] = {420, 420, 300, 120, 150, 380, 330, 290, 250, 220, 190, 160, 140, 120, 110, 100};
   const int n = (int)(sizeof FLASH / sizeof *FLASH);
+  if (flashFrame == 0)
+    nature_thunder();
   if (flashFrame < n) {
     for (int c = 0; c < 3; c++)
       out[c] = out[c] * FLASH[flashFrame] / 100;
@@ -3144,6 +3152,8 @@ static void amb_after_run(void) {
   else
     ambCamH = ambCamV = -1, ambCamDx = ambCamDy = 0;
   ambSeasonDrawn = field && fine && ambKind < 0 && ambSeasonShown >= 0 && ambSeasonShown != SEASON_SUMMER ? ambSeasonShown : -1;
+  nature_after_run(field && !snap.inBattle, field && fine && ambKind < 0 && !snap.inBattle, season,
+                   ambSky && (ambKind == DSW_RAIN || ambKind == DSW_STORM) ? (ambKind == DSW_STORM ? 2 : 1) : 0);
   if (!haveGame) {
     dsw_reset();
     ambPlayFrames = 0;
@@ -3175,21 +3185,230 @@ static void amb_plot(int x, int y, uint32_t rgb, int a) {
            b = ((c & 255) * (256 - a) + (rgb & 255) * a) >> 8;
   *d = r << 16 | g << 8 | b;
 }
-static void amb_draw(void) {
-  if (ambKind < 0 && ambSeasonDrawn < 0)
+/* NATURE (Capsule's build, retro_pd_nature): what the world does by itself, none of it the game's own - fireflies on a
+ * summer night, a shooting star now and then on a clear night, an autumn morning's mist (the device's clock and the
+ * SEASONS' season, else the calendar's), and the rain and thunder heard under DYNAMIC WEATHER (made here: noise). */
+static bool natureOn = true;
+RETRO_API void retro_pd_nature(int on) { natureOn = on != 0; }
+static int natureRain;                       // DYNAMIC WEATHER's rain heard: 0 none, 1 rain, 2 storm
+static int flyK, starOk, mistK;              // fireflies / stars (eased 0..256) / mist strength
+static uint32_t natureSeed = 0x2545F491u;
+static uint32_t nature_rand(void) {
+  natureSeed ^= natureSeed << 13;
+  natureSeed ^= natureSeed >> 17;
+  natureSeed ^= natureSeed << 5;
+  return natureSeed;
+}
+static float nature_hour(void) {
+  time_t now = time(NULL);
+  struct tm tmv;
+#ifdef _WIN32
+  localtime_s(&tmv, &now);
+#else
+  localtime_r(&now, &tmv);
+#endif
+  return tmv.tm_hour + tmv.tm_min / 60.f;
+}
+static int nature_season(int season) {
+  if (season >= 0)
+    return season;
+  time_t now = time(NULL);
+  struct tm tmv;
+#ifdef _WIN32
+  localtime_s(&tmv, &now);
+#else
+  localtime_r(&now, &tmv);
+#endif
+  const int m = tmv.tm_mon; // Mar-May spring, Jun-Aug summer, Sep-Nov autumn, Dec-Feb winter
+  return m >= 2 && m <= 4 ? SEASON_SPRING : m >= 5 && m <= 7 ? SEASON_SUMMER : m >= 8 && m <= 10 ? SEASON_AUTUMN : SEASON_WINTER;
+}
+static void nature_after_run(bool outdoors, bool clear, int season, int rain) {
+  natureRain = natureOn && outdoors ? rain : 0;
+  const float h = nature_hour();
+  const int s = nature_season(season);
+  const bool night = h >= 21.5f || h < 4.5f;
+  const int flyWant = natureOn && clear && night && s == SEASON_SUMMER ? 256 : 0;
+  flyK += flyWant > flyK ? 4 : flyWant < flyK ? -8 : 0;
+  starOk = natureOn && clear && (h >= 21.f || h < 5.f);
+  // Mist: autumn mornings, thickest 6:30-7:30, gone by 9:30.
+  int mist = 0;
+  if (natureOn && clear && s == SEASON_AUTUMN && h >= 5.f && h < 9.5f)
+    mist = h < 6.5f ? (int)((h - 5.f) / 1.5f * 256) : h < 7.5f ? 256 : (int)((9.5f - h) / 2.f * 256);
+  mistK += mist > mistK ? 4 : mist < mistK ? -6 : 0;
+  if (mistK < 0)
+    mistK = 0;
+}
+
+static struct { float x, y, vx, vy, phase, speed; } flies[16];
+static bool fliesPlaced;
+static struct { float x, y, dx, dy; int life; } star;
+static int starWait = 600;
+static uint32_t natureTick;
+
+static void nature_glow(int cx, int cy, int r, uint32_t rgb, int a) {
+  for (int y = -r; y <= r; y++)
+    for (int x = -r; x <= r; x++) {
+      const int d2 = x * x + y * y;
+      if (d2 > r * r)
+        continue;
+      amb_plot(cx + x, cy + y, rgb, a * (r * r - d2) / (r * r));
+    }
+}
+static void nature_mist(int scale) {
+  // A pale veil, thicker and thinner in slow drifting patches: 8-pixel blocks (in game pixels), each its own alpha.
+  const float t = natureTick * 0.004f;
+  const int b = 8 * scale;
+  for (int by = 0; by < CH; by += b)
+    for (int bx = 0; bx < CW; bx += b) {
+      const float n = (sinf(bx * 0.004f / scale * 3 + t) + sinf(by * 0.005f / scale * 3 - t * 0.7f) +
+                       sinf((bx + by) * 0.003f / scale * 3 + t * 0.4f)) / 6.f + 0.5f;
+      const int a = (int)(mistK * (0.04f + 0.30f * n * n));
+      if (a <= 2)
+        continue;
+      for (int y = by; y < by + b && y < CH; y++)
+        for (int x = bx; x < bx + b && x < CW; x++)
+          amb_plot(x, y, 0xD8DEE4, a);
+    }
+}
+static void nature_draw(float camX, float camY, int scale) {
+  natureTick++;
+  if (mistK > 0)
+    nature_mist(scale);
+  if (flyK > 0) {
+    if (!fliesPlaced) {
+      for (size_t i = 0; i < sizeof flies / sizeof *flies; i++) {
+        flies[i].x = (float)(nature_rand() % (unsigned)CW);
+        flies[i].y = (float)(nature_rand() % (unsigned)CH);
+        flies[i].phase = (nature_rand() % 628) / 100.f;
+        flies[i].speed = 0.03f + (nature_rand() % 40) / 1000.f;
+      }
+      fliesPlaced = true;
+    }
+    for (size_t i = 0; i < sizeof flies / sizeof *flies; i++) {
+      // A slow wander (a nudge now and then), carried with the map, round the picture's edges.
+      if (nature_rand() % 40 == 0) {
+        flies[i].vx = ((int)(nature_rand() % 200) - 100) / 400.f * scale;
+        flies[i].vy = ((int)(nature_rand() % 200) - 100) / 500.f * scale;
+      }
+      flies[i].x += flies[i].vx - camX;
+      flies[i].y += flies[i].vy - camY;
+      if (flies[i].x < -8) flies[i].x += CW + 16;
+      if (flies[i].x > CW + 8) flies[i].x -= CW + 16;
+      if (flies[i].y < -8) flies[i].y += CH + 16;
+      if (flies[i].y > CH + 8) flies[i].y -= CH + 16;
+      flies[i].phase += flies[i].speed;
+      const float glow = sinf(flies[i].phase);
+      if (glow <= 0)
+        continue;
+      const int a = (int)(glow * flyK);
+      nature_glow((int)flies[i].x, (int)flies[i].y, 4 * scale, 0xC8FF6A, a / 2);
+      nature_glow((int)flies[i].x, (int)flies[i].y, scale * 3 / 2, 0xF8FFD0, a);
+    }
+  } else
+    fliesPlaced = false;
+  // A shooting star: every 20-70 s of a clear night, across the picture's top half in under a second.
+  if (star.life > 0) {
+    star.x += star.dx;
+    star.y += star.dy;
+    const int len = 26;
+    for (int k = 0; k < len; k++) {
+      const int a = (256 - k * 256 / len) * (star.life > 8 ? 256 : star.life * 32) / 256;
+      const int px = (int)(star.x - star.dx * k / 3.f), py = (int)(star.y - star.dy * k / 3.f);
+      for (int w = 0; w < scale; w++)
+        for (int v = 0; v < scale; v++)
+          amb_plot(px + v, py + w, 0xFFFFF0, a);
+    }
+    star.life--;
+  } else if (starOk && --starWait <= 0) {
+    starWait = 1200 + (int)(nature_rand() % 3000u);
+    star.x = (float)(nature_rand() % (unsigned)(CW * 2 / 3));
+    star.y = (float)(nature_rand() % (unsigned)(CH / 4));
+    star.dx = (2.5f + (nature_rand() % 100) / 50.f) * scale;
+    star.dy = star.dx * (0.35f + (nature_rand() % 30) / 100.f);
+    star.life = 26;
+  } else if (!starOk)
+    starWait = starWait < 600 ? 600 : starWait;
+}
+
+/* The rain and thunder heard: made from noise at the core's rate (32768 Hz), mixed into the game's sound. */
+static float rainLevel, thunderEnv, thunderRumble, rainLp[2], rainBp[2], dropLp[2], brown[2], thunderLp;
+static int thunderIn = -1; // samples until the thunder of the last flash
+static void nature_thunder(void) {
+  if (natureRain)
+    thunderIn = 8000 + (int)(nature_rand() % 50000u); // 0.25-1.8 s after the flash
+}
+static float nature_noise(void) { return (int32_t)nature_rand() / 2147483648.f; }
+static void nature_mix(int16_t *buf, size_t frames) {
+  const float want = natureRain == 2 ? 1.f : natureRain == 1 ? 0.6f : 0.f;
+  if (want == 0.f && rainLevel < 0.001f && thunderEnv < 0.001f && thunderIn < 0)
     return;
-  struct dsw_target t = {amb_plot, CW, CH, wideReady ? game_scale(wideW, wideH) : game_scale(gameW, gameH), ambCamDx,
-                         ambCamDy};
+  for (size_t i = 0; i < frames; i++) {
+    rainLevel += (want - rainLevel) * 0.00003f; // ~1 s to come and go
+    if (thunderIn >= 0 && --thunderIn < 0)
+      thunderEnv = 0.7f + (nature_rand() % 30) / 100.f;
+    thunderEnv *= 0.99996f;                     // ~2 s to die away
+    thunderRumble += (nature_noise() - thunderRumble) * 0.0004f;
+    float out[2];
+    for (int c = 0; c < 2; c++) {
+      const float n = nature_noise();
+      rainLp[c] += (n - rainLp[c]) * 0.35f;
+      rainBp[c] += (rainLp[c] - rainBp[c]) * 0.04f;
+      float rain = (rainLp[c] - rainBp[c]) * 0.55f;
+      if (nature_rand() % 1400 == 0)
+        dropLp[c] += nature_noise() * 3.f; // a drop
+      dropLp[c] *= 0.93f;
+      rain += dropLp[c] * 0.25f;
+      brown[c] = brown[c] * 0.996f + nature_noise() * 0.06f;
+      thunderLp += (brown[c] - thunderLp) * 0.02f;
+      const float thunder = thunderLp * thunderEnv * (0.55f + 2.2f * fabsf(thunderRumble));
+      out[c] = rain * rainLevel * 8000.f + thunder * 30000.f;
+    }
+    for (int c = 0; c < 2; c++) {
+      const float v = buf[i * 2 + c] + out[c];
+      buf[i * 2 + c] = (int16_t)(v > 32767.f ? 32767.f : v < -32768.f ? -32768.f : v);
+    }
+  }
+}
+static retro_audio_sample_batch_t natureAudioOut;
+static size_t nature_audio(const int16_t *data, size_t frames) {
+  if (!natureAudioOut)
+    return frames;
+  static int16_t mixed[4096 * 2];
+  size_t done = 0;
+  while (done < frames) {
+    const size_t n = frames - done > 4096 ? 4096 : frames - done;
+    memcpy(mixed, data + done * 2, n * 4);
+    nature_mix(mixed, n);
+    natureAudioOut(mixed, n);
+    done += n;
+  }
+  return frames;
+}
+
+RETRO_API void retro_set_audio_sample_batch(retro_audio_sample_batch_t cb) {
+  natureAudioOut = cb;
+  mgba_retro_set_audio_sample_batch(nature_audio);
+}
+
+static void amb_draw(void) {
+  const int scale = wideReady ? game_scale(wideW, wideH) : game_scale(gameW, gameH);
+  const float camX = ambCamDx * scale, camY = ambCamDy * scale;
+  if (ambKind >= 0 || ambSeasonDrawn >= 0) {
+    struct dsw_target t = {amb_plot, CW, CH, scale, ambCamDx, ambCamDy};
+    if (ambKind >= 0)
+      dsw_weather(ambKind, &t);
+    else
+      dsw_season(ambSeasonDrawn, &t);
+  }
   ambCamDx = ambCamDy = 0;
-  if (ambKind >= 0)
-    dsw_weather(ambKind, &t);
-  else
-    dsw_season(ambSeasonDrawn, &t);
+  nature_draw(camX, camY, scale);
 }
 #else
 RETRO_API void retro_pd_weather_cart(const char *ndsPath) { (void)ndsPath; }
 RETRO_API void retro_pd_ambience(int dsWeather, int seasons) { (void)dsWeather; (void)seasons; }
 RETRO_API void retro_pd_dynamic_weather(int on) { (void)on; }
+RETRO_API void retro_pd_nature(int on) { (void)on; }
+static void nature_thunder(void) {}
 RETRO_API void retro_pd_follower(const char *ndsPath) { (void)ndsPath; }
 static int ambKind = -1, ambSeasonDrawn = -1;
 static void amb_after_run(void) {}

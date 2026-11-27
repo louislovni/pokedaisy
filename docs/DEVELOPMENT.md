@@ -4179,6 +4179,14 @@ it: a player turned it off and the dynamic rain stayed); the game's own weather 
 (`day_night_sky`: rain / snow 0.7-0.8, a storm darker, eased in and out over ~2 s, also with DAY AND NIGHT off) and a storm's
 lightning flashes it every 4-14 s (two flashes, then back; `tint555` clamps past 256). Only for the weather it brings.
 
+NATURE (`retro_pd_nature`, Capsule's AMBIANCE page "Nature vivante", the host's NATURE row with `nature` in host.ini): what
+the world does by itself, none of it the game's, drawn after the weather (`nature_draw`) - fireflies on a summer night
+(21:30-4:30, a clear sky, outdoors; carried with the map), a shooting star every 20-70 s of a clear night, an autumn morning's
+mist (5:00-9:30, thickest 6:30-7:30: 8-pixel blocks of a pale veil in drifting patches); the season is SEASONS' when on, else
+the calendar's. And the sound of DYNAMIC WEATHER's rain (band-passed noise and drops) and each lightning's thunder 0.25-1.8 s
+later (low-passed brown noise with a slow rumble), made at 32768 Hz and mixed into the game's sound: `retro_set_audio_sample_batch`
+is the core's own, passing mGBA's sound through `nature_audio` (and FF SOUND's through `nature_mix`).
+
 ## Releasing
 
 See [RELEASING.md](RELEASING.md): `make bump V=x.y.z`, merge, `make release` (tags
