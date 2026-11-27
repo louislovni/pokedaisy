@@ -4167,6 +4167,12 @@ the same cart: `a/0/8/1` (mmodel.narc) member 297 + follow_mon.c's `sModelIndexL
 textures (0 / 1 away, 2 / 3 towards, 4 / 5 to the left) and two palettes (normal, shiny). Headless: the core over a French Emerald save on Route 120 (7, 15)'s rain trigger and
 Route 111's desert.
 
+DYNAMIC WEATHER (`retro_pd_dynamic_weather`, Capsule's AMBIANCE page, the host's AMBIENCE page with `dyn_weather` in
+host.ini): on the game's fine days (weather 0-2) outdoors, each map section gets its own sky for each 12 minutes of the
+device's clock (`amb_dynamic`: a hash of both, 60 % fine, else rain or now and then a storm; snow in a season's winter, a
+summer's skies mostly fine), drawn with the cart's weather like DS WEATHER; the game's own weather goes first. It needs the
+cart open, so the frontends keep it while either is on.
+
 ## Releasing
 
 See [RELEASING.md](RELEASING.md): `make bump V=x.y.z`, merge, `make release` (tags

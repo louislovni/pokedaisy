@@ -2924,6 +2924,27 @@ RETRO_API void retro_pd_ambience(int dsWeather, int seasons) {
   ambDsWeather = dsWeather != 0;
   ambSeasons = seasons >= 1 && seasons <= 8 ? seasons : 0;
 }
+/* DYNAMIC WEATHER: on the game's fine days outdoors, the DS weather comes and goes by itself (amb_dynamic). */
+static bool ambDynamic;
+RETRO_API void retro_pd_dynamic_weather(int on) { ambDynamic = on != 0; }
+/* Each area's sky for each 12 minutes of the device's clock: mostly fine, else rain (a storm now and then), snow in winter.
+ * The same area at the same time always has the same sky; walking into the next area can change it. */
+static int amb_dynamic(int season) {
+  if (!ambDynamic || snap.mapsec < 0)
+    return DSW_NONE;
+  uint32_t h = (uint32_t)(time(NULL) / (12 * 60)) * 2654435761u ^ (uint32_t)snap.mapsec * 40503u;
+  h ^= h >> 15;
+  h *= 2246822519u;
+  h ^= h >> 13;
+  const unsigned r = h % 100u;
+  if (r < 60)
+    return DSW_NONE;
+  if (season == SEASON_WINTER)
+    return DSW_SNOW;
+  if (season == SEASON_SUMMER && r < 75)
+    return DSW_NONE; // summer: fewer rainy spells
+  return r < 88 ? DSW_RAIN : DSW_STORM;
+}
 
 /* FOLLOWER: the cart HeartGold / SoulSilver's following Pokémon come from (empty: off), and which one is loaded. */
 static char followCart[1024];
@@ -3025,6 +3046,7 @@ static void amb_after_run(void) {
   const bool field = amb_field();
   ambKind = ambDsWeather && dsw_ready() && field && amb_hides() ? amb_kind(snap.weather) : DSW_NONE;
   pk_wide_weather_hide(ambKind >= 0 ? amb_game_sprites(ambKind) : 0);
+  const bool gameWeather = ambKind >= 0;
   if (field)
     ambPlayFrames++;
   int season = SEASON_NONE;
@@ -3064,6 +3086,9 @@ static void amb_after_run(void) {
   pk_season_set(colours ? ambSeasonShown : -1, ambSeasonK);
   const int w = snap.weather;
   const bool fine = w == 0 || w == 1 || w == 2;
+  // DYNAMIC WEATHER: on a fine day the area's own sky (a season's winter brings snow); the game's weather goes first.
+  if (!gameWeather && field && fine && dsw_ready())
+    ambKind = amb_dynamic(season);
   if (field)
     amb_camera();
   else
@@ -3114,6 +3139,7 @@ static void amb_draw(void) {
 #else
 RETRO_API void retro_pd_weather_cart(const char *ndsPath) { (void)ndsPath; }
 RETRO_API void retro_pd_ambience(int dsWeather, int seasons) { (void)dsWeather; (void)seasons; }
+RETRO_API void retro_pd_dynamic_weather(int on) { (void)on; }
 RETRO_API void retro_pd_follower(const char *ndsPath) { (void)ndsPath; }
 static int ambKind = -1, ambSeasonDrawn = -1;
 static void amb_after_run(void) {}
