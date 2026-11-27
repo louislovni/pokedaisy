@@ -1944,7 +1944,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
 #endif
 #ifdef CAPSULE_COOP
   if (!dsGame) {
-    // The core's co-op presence (pd_libretro.c), if it has it: Capsule's JOUER A DEUX for Emerald.
+    // The core's co-op presence (pd_libretro.c), if it has it: Capsule's JOUER A DEUX for Emerald, FireRed and LeafGreen.
     struct capsule_coop_core coop = {(int (*)(void))dlsym(core.dl, "retro_pd_coop_available"),
                                      (int (*)(uint32_t, uint8_t *))dlsym(core.dl, "retro_pd_coop_frame"),
                                      (void (*)(const uint8_t *, size_t, uint32_t))dlsym(core.dl, "retro_pd_coop_receive"),

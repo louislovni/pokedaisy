@@ -1760,6 +1760,13 @@ FireRed / Emerald and the four follower hacks), `SpritePackFlowTest` (the zip re
 
 ### Co-op: seeing each other (the partner on your map)
 
+**FireRed / LeafGreen (Capsule's core, 2026-11-28):** `pd_coop.inc` takes BPR? / BPG? (Western languages) too, for seeing
+each other only (the joined battles and trades check Emerald's SHA-1s). The art from pret/pokefirered's RED / LEAF sheets
+(`COOP_FR_HERO`: the walking one, the surfing-and-running one - surfing S / N / W then the running nine -, the bike, found by
+probe and CRC, the same bytes in the English and French carts of both games), their one palette and the surf blob (frames 0,
+2, 4); FireRed's one bike fills both bike places. The gender is the snapshot's. Capsule's `coop_rom_accepted` lists FireRed
+and LeafGreen 1.0 (English) and the French carts; both players need the same ROM.
+
 Two linked players on retail English Emerald (BPEE, SHA-1 `f3ae0881...`, the same ROM on both) see each other's character
 on a shared map: walking, running, riding either bike and surfing, in the game's picture and in EXPAND's margins. It is only
 visual: you walk through each other, nothing is written into the game's RAM, save or states, and the partner's sprites are put

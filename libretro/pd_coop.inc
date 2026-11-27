@@ -5,7 +5,8 @@
  *   retro_pd_coop_frame(now, out)      after each retro_run: 1 = `out` holds an update (PD_COOP_PRESENCE_SIZE bytes) to send
  *   retro_pd_coop_receive(msg, n, now) an update the partner sent
  *   retro_pd_coop_stop()               the link is gone: nothing drawn, nothing kept
- *   retro_pd_coop_available()          1 = the loaded game can (Emerald, any Western language, its heroes found)
+ *   retro_pd_coop_available()          1 = the loaded game can (Emerald, FireRed / LeafGreen, any Western language, its
+ *                                      heroes found)
  * `now` is the device's monotonic clock in ms (only differences count; 32 bits wrap).
  *
  * The wire format is the app's (companion/data/coop/Presence.kt's PresenceCodec, 20 bytes, little endian): u8 version 1,
@@ -292,6 +293,35 @@ static const uint8_t *coop_find(const struct coop_blob *b) {
   return NULL;
 }
 
+/* FireRed / LeafGreen (any Western language, the same bytes): RED's and LEAF's sheets as pret/pokefirered has them - the
+ * walking one (9 frames 16x32), the surfing-and-running one (surfing S / N / W, then the running nine), the bike (9 frames
+ * 32x32) - their one palette (both heroes') and the surf blob (S, S, N, N, W, W). */
+enum { CF_NORMAL, CF_SURF_RUN, CF_BIKE, CF_COUNT };
+static const struct coop_blob COOP_FR_HERO[2][CF_COUNT] = {
+    {
+        {2304, 0x97E097A0u, 120, {0xBB, 0xBB, 0x08, 0x00, 0xBB, 0xBB, 0x8C, 0x00, 0x00, 0xCF, 0xBC, 0xBB, 0x00, 0xCF, 0xCC, 0x9C}},
+        {3584, 0xF0F56B06u, 120, {0xBB, 0xBB, 0x08, 0x00, 0xBB, 0xBB, 0x8C, 0x00, 0x00, 0xCF, 0xBC, 0xBB, 0x00, 0xCF, 0xCC, 0x9C}},
+        {4608, 0x6B1D97B2u, 284, {0x00, 0x00, 0x00, 0x00, 0x00, 0xCF, 0xCC, 0x9C, 0xF0, 0x81, 0xCA, 0xCA, 0xF0, 0xF3, 0x96, 0x99}},
+    },
+    {
+        {2304, 0xB7EFD380u, 116, {0x99, 0xA9, 0x06, 0x00, 0x99, 0x99, 0x06, 0x00, 0x99, 0x99, 0x6A, 0x00, 0x60, 0xA9, 0x9A, 0xB9}},
+        {3584, 0x56F35E89u, 116, {0x99, 0xA9, 0x06, 0x00, 0x99, 0x99, 0x06, 0x00, 0x99, 0x99, 0x6A, 0x00, 0x60, 0xA9, 0x9A, 0xB9}},
+        {4608, 0xFD3EA998u, 280, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x60, 0xA9, 0xAC, 0xAC, 0xF0, 0xA6, 0xCA, 0xCC}},
+    },
+};
+static const struct coop_blob COOP_FR_SURF_BLOB = {
+    3072, 0xDDFE3A4Bu, 284, {0x00, 0x00, 0x00, 0xF9, 0x00, 0x00, 0xFF, 0x66, 0x00, 0x6F, 0x66, 0x77, 0xF0, 0x66, 0x76, 0x77}};
+static const struct coop_blob COOP_FR_PAL = {
+    32, 0x45DB95BEu, 0, {0xF0, 0x51, 0xF5, 0x21, 0x1F, 0x4B, 0x5B, 0x3A, 0x0F, 0x21, 0x08, 0x69, 0xE7, 0x3C, 0x8E, 0x62}};
+
+/** FireRed / LeafGreen's game code (BPR? / BPG?, a Western language). */
+static bool coop_kanto(void) {
+  if (!romData || romLen < 0xB0)
+    return false;
+  const char *code = (const char *)romData + 0xAC;
+  return (!memcmp(code, "BPR", 3) || !memcmp(code, "BPG", 3)) && code[3] && strchr("EFDIS", code[3]);
+}
+
 static uint8_t coopArt[2][PK_PARTNER_ART_BYTES];
 static int coopArtState[2]; // 0 not tried, 1 built, -1 not in this ROM
 static int coopShownArt = -1; // the gender whose art the native side holds
@@ -304,10 +334,39 @@ static void coop_widen(const uint8_t *f, uint8_t *out) {
       memcpy(out + (ty * 4 + tx + 1) * 32, f + (ty * 2 + tx) * 32, 32);
 }
 
+/* PartnerArt's layout from FireRed's sheets: the bike in both bike places (FireRed has one), surfing widened. */
+static bool coop_build_art_kanto(int female) {
+  const uint8_t *part[CF_COUNT];
+  for (int i = 0; i < CF_COUNT; i++)
+    if (!(part[i] = coop_find(&COOP_FR_HERO[female][i])))
+      return false;
+  const uint8_t *blob = coop_find(&COOP_FR_SURF_BLOB), *pal = coop_find(&COOP_FR_PAL);
+  if (!blob || !pal)
+    return false;
+  uint8_t *out = coopArt[female];
+  int at = 0;
+  for (int i = 0; i < 9; i++, at += 512)
+    coop_widen(part[CF_NORMAL] + i * 256, out + at);
+  for (int i = 0; i < 9; i++, at += 512)
+    coop_widen(part[CF_SURF_RUN] + (3 + i) * 256, out + at);
+  for (int s = 0; s < 2; s++)
+    for (int i = 0; i < 9; i++, at += 512)
+      memcpy(out + at, part[CF_BIKE] + i * 512, 512);
+  for (int i = 0; i < 3; i++, at += 512)
+    coop_widen(part[CF_SURF_RUN] + i * 256, out + at);
+  for (int i = 0; i < 3; i++, at += 512)
+    memcpy(out + at, blob + i * 2 * 512, 512);
+  memcpy(out + at, pal, 32);
+  coopArtState[female] = 1;
+  return true;
+}
+
 static bool coop_build_art(int female) {
   if (coopArtState[female])
     return coopArtState[female] > 0;
   coopArtState[female] = -1;
+  if (coop_kanto())
+    return coop_build_art_kanto(female);
   const uint8_t *blob = coop_find(&COOP_SURF_BLOB);
   const uint8_t *part[CB_COUNT];
   for (int i = 0; i < CB_COUNT; i++)
@@ -360,14 +419,17 @@ RETRO_API int retro_pd_coop_available(void) {
       // Emerald in a Western language (BPEE / BPEF / BPED / BPEI / BPES): the same maps and the same RAM the field reads use.
       const char *code = (const char *)romData + 0xAC;
       bool emerald = !memcmp(code, "BPE", 3) && strchr("EFDIS", code[3]) && code[3];
-      coopAvailable = emerald && coop_build_art(0) && coop_build_art(1);
+      // Or FireRed / LeafGreen (seeing each other only: the joined battles and trades are Emerald's).
+      coopAvailable = (emerald || coop_kanto()) && coop_build_art(0) && coop_build_art(1);
     }
   }
   return coopAvailable;
 }
 
-/** The player's gender: SaveBlock2's playerGender (gSaveBlock2Ptr, Emerald's 0x03005D90, + 8). */
+/** The player's gender: SaveBlock2's playerGender (gSaveBlock2Ptr, Emerald's 0x03005D90, + 8; FireRed's the snapshot's). */
 static bool coop_female(void) {
+  if (coop_kanto())
+    return snap.valid && snap.gender == 1;
   uint32_t sb2 = 0;
   uint8_t g = 0;
   if (!pd_lr_read_memory(core, 0x03005D90u, &sb2, 4) || (sb2 >> 24) != 2)
