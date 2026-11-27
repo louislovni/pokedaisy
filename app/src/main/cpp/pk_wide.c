@@ -842,6 +842,10 @@ static bool tintShown;                              // the renderer holds tinted
 
 static inline uint16_t tint555(uint16_t c) {
     int r = (c & 31) * tintR >> 8, g = ((c >> 5) & 31) * tintG >> 8, b = ((c >> 10) & 31) * tintB >> 8;
+    // Past 256 (a storm's lightning, Capsule's build): white at most.
+    if (r > 31) r = 31;
+    if (g > 31) g = 31;
+    if (b > 31) b = 31;
     return (uint16_t) (r | g << 5 | b << 10);
 }
 

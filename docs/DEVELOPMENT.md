@@ -4175,7 +4175,9 @@ DYNAMIC WEATHER (`retro_pd_dynamic_weather`, Capsule's AMBIANCE page, the host's
 host.ini): on the game's fine days (weather 0-2) outdoors, each map section gets its own sky for each 12 minutes of the
 device's clock (`amb_dynamic`: a hash of both, 60 % fine, else rain or now and then a storm; snow in a season's winter, a
 summer's skies mostly fine), drawn with the cart's weather, only while DS WEATHER is on (turning DS WEATHER off ends all of
-it: a player turned it off and the dynamic rain stayed); the game's own weather goes first.
+it: a player turned it off and the dynamic rain stayed); the game's own weather goes first. Its clouds dim the map through DAY AND NIGHT's tint
+(`day_night_sky`: rain / snow 0.7-0.8, a storm darker, eased in and out over ~2 s, also with DAY AND NIGHT off) and a storm's
+lightning flashes it every 4-14 s (two flashes, then back; `tint555` clamps past 256). Only for the weather it brings.
 
 ## Releasing
 

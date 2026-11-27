@@ -1598,6 +1598,42 @@ static void hud_field_tick(void) {
 /* DAY AND NIGHT (the app's DayNight.kt): outdoors on the field, the map tinted by the clock - night blue, dawn pink, dusk
  * orange - eased a little each frame; none in battles, indoors and off. */
 static int dayTint[3] = {256, 256, 256};
+/* DYNAMIC WEATHER's sky (amb_after_run): 0 fine, 1 rain, 2 storm. Its clouds dim the map (eased in over ~2 s, out the
+ * same), a storm darker, and a storm's lightning flashes it now and then (a bright flash, a moment's dark, a second one,
+ * then back over a few frames). Only the weather it brings: the games darken and flash for their own. */
+static int ambSky, skyK, skyKind = 1, flashAt = -1, flashFrame;
+static uint32_t flashSeed = 0x9E3779B9u;
+static void day_night_sky(int out[3]) {
+  if (ambSky) skyKind = ambSky;
+  const int want = ambSky ? 256 : 0;
+  skyK += want > skyK ? 2 : want < skyK ? -3 : 0;
+  if (skyK < 0) skyK = 0;
+  if (skyK > 256) skyK = 256;
+  static const int DIM[3][3] = {{256, 256, 256}, {178, 186, 206}, {138, 146, 176}};
+  for (int c = 0; c < 3; c++)
+    out[c] = out[c] * (256 * 256 - skyK * (256 - DIM[skyKind][c])) / (256 * 256);
+  // Lightning: every 4-14 s of a storm.
+  if (ambSky != 2 || skyK < 200) {
+    flashAt = -1;
+    return;
+  }
+  if (flashAt < 0) {
+    flashSeed = flashSeed * 1664525u + 1013904223u;
+    flashAt = 240 + (int)((flashSeed >> 8) % 600u);
+    flashFrame = 0;
+  }
+  if (--flashAt > 0)
+    return;
+  static const int FLASH[] = {420, 420, 300, 120, 150, 380, 330, 290, 250, 220, 190, 160, 140, 120, 110, 100};
+  const int n = (int)(sizeof FLASH / sizeof *FLASH);
+  if (flashFrame < n) {
+    for (int c = 0; c < 3; c++)
+      out[c] = out[c] * FLASH[flashFrame] / 100;
+    flashFrame++;
+    flashAt = 1;
+  } else
+    flashAt = -1;
+}
 static void day_night_target(int out[3]) {
   static const struct { float h; int c[3]; } keys[] = {
     {0, {135, 150, 225}}, {4.5f, {135, 150, 225}}, {6, {245, 220, 220}}, {7.5f, {256, 256, 256}},
@@ -1639,8 +1675,16 @@ static void day_night_tick(void) {
       moved = true;
     }
   }
-  if (moved)
-    pk_tint_set(core, dayTint[0], dayTint[1], dayTint[2]);
+  // The weather's clouds and lightning over the clock's tint (not eased: day_night_sky eases its own).
+  static int shown[3] = {256, 256, 256};
+  int sky[3] = {dayTint[0], dayTint[1], dayTint[2]};
+  day_night_sky(sky);
+  if (moved || sky[0] != shown[0] || sky[1] != shown[1] || sky[2] != shown[2]) {
+    pk_tint_set(core, sky[0], sky[1], sky[2]);
+    shown[0] = sky[0];
+    shown[1] = sky[1];
+    shown[2] = sky[2];
+  }
 }
 
 /* A game closed: no tint left for the next. */
@@ -1650,6 +1694,8 @@ static void day_night_reset(void) {
     pk_tint_set(core, 256, 256, 256);
 #endif
   dayTint[0] = dayTint[1] = dayTint[2] = 256;
+  ambSky = skyK = 0;
+  flashAt = -1;
 }
 
 /* The companion, drawn into `canvas` (the game's, or the dock's swapped in). */
@@ -3090,6 +3136,9 @@ static void amb_after_run(void) {
   // Under DS WEATHER: turned off, no HeartGold weather is drawn at all.
   if (ambDsWeather && !gameWeather && field && fine && dsw_ready())
     ambKind = amb_dynamic(season);
+  ambSky = !gameWeather && (ambKind == DSW_RAIN || ambKind == DSW_STORM || ambKind == DSW_SNOW) && !snap.inBattle
+               ? (ambKind == DSW_STORM ? 2 : 1)
+               : 0;
   if (field)
     amb_camera();
   else
