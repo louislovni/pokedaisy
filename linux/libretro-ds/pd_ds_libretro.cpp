@@ -1673,13 +1673,70 @@ RETRO_API bool retro_unserialize(const void* data,size_t n){
 // music only. A second machine from the game's state, its ARM9 halted for good (no interrupt left to wake it): the game's
 // logic stops, the ARM7's sound driver plays on, once a frame of real time. A new song (the sound system's current BGM)
 // makes a new copy once it's settled (pk_nds_bgm_settle: no fade running, its player not paused); a song going (0)
-// fades the copy out. Sound effects aren't heard (their commands come from the stopped ARM9).
+// fades the copy out. The sound effects: the game's sound commands (NitroSDK's, a chain of 0x18-byte SNDCommand in main
+// RAM, its address sent on the IPC FIFO, tag 7) for the players other than the music's (0) are given the copy's ARM7 too
+// (forward), with what they point at (the sequence, its bank and wave archives) copied over when the copy's differs. A Pokémon's cry
+// (the channels' own commands, not a player's) isn't.
 namespace pd_ds::ffs {
 std::unique_ptr<ds::NDS> copy;
 bool on=false, playing=false, broken=false;
 int bgm=-1, waitFrames=-1, state=-1, stateSeen=-1, stateFrames=0;
 float gain=1.f, gainStep=0.f;
 constexpr int SETTLE=4, MAX_WAIT=300, FADE=30;
+uint32_t pushSeen=0;
+static const bool logOn=std::getenv("PD_FFS_LOG")!=nullptr;
+uint32_t pushed(){const auto& f=nds->io.cpu_io[0].fifo_out;return (f.head+f.count)&15;}
+// Make sure what a command points at is the copy's too: 'len' bytes from 'a', compared then copied if they differ.
+void same_memory(uint32_t a,uint32_t len){
+  if(a<0x02000000 || a+len>0x02400000)return;
+  auto& from=nds->bus;auto& to=copy->bus;
+  bool differ=false;
+  for(uint32_t o=0;o<len && !differ;o+=4)differ=from.dma_read32(ds::Cpu::ARM9,a+o)!=to.dma_read32(ds::Cpu::ARM9,a+o);
+  if(!differ)return;
+  if(logOn)std::fprintf(stderr,"[ffs] copy %08x+%x\n",a,len);
+  for(uint32_t o=0;o<len;o+=4)to.dma_write32(ds::Cpu::ARM9,a+o,from.dma_read32(ds::Cpu::ARM9,a+o));
+}
+// The game's sound commands sent this frame, the music's dropped, given the copy.
+void forward(){
+  const uint32_t now=pushed();
+  const auto& f=nds->io.cpu_io[0].fifo_out;
+  for(;pushSeen!=now;pushSeen=(pushSeen+1)&15){
+    const uint32_t v=f.data[pushSeen];
+    if((v&31)!=7 || (v>>6)<0x100000)continue;
+    uint32_t p=0x02000000|((v>>6)&0xFFFFFF), first=0, last=0;
+    auto& b=nds->bus;
+    for(int n=0;n<64 && p>=0x02000000 && p<0x023FFFE8;++n){
+      const uint32_t next=b.dma_read32(ds::Cpu::ARM9,p), id=b.dma_read32(ds::Cpu::ARM9,p+4), a0=b.dma_read32(ds::Cpu::ARM9,p+8);
+      if(id<=10 && (a0&0xFF)!=0 && (a0&0xFF)<16){   // a player's (START_SEQ .. PLAYER_LOCAL_VAR), not the music's
+        for(uint32_t o=4;o<0x18;o+=4)copy->bus.dma_write32(ds::Cpu::ARM9,p+o,b.dma_read32(ds::Cpu::ARM9,p+o));
+        copy->bus.dma_write32(ds::Cpu::ARM9,p,0);
+        if(last)copy->bus.dma_write32(ds::Cpu::ARM9,last,p);else first=p;
+        last=p;
+        if(id==0 || id==2){                        // the sequence and its bank
+          same_memory(b.dma_read32(ds::Cpu::ARM9,p+12),0x2000);
+          const uint32_t bank=b.dma_read32(ds::Cpu::ARM9,p+20);
+          same_memory(bank,0x400);
+          if(bank>=0x02000000 && bank<0x023FFFE0)
+            for(uint32_t w=0;w<4;++w){                // the bank's wave archives (SNDBankData.waveArcLink), whole
+              const uint32_t arc=b.dma_read32(ds::Cpu::ARM9,bank+0x18+w*8);
+              if(arc<0x02000000 || arc>=0x023FFFF0)continue;
+              const uint32_t size=b.dma_read32(ds::Cpu::ARM9,arc+8);
+              if(size>=0x20 && size<=0x100000)same_memory(arc,(size+3)&~3u);
+            }
+        }
+        if(logOn)std::fprintf(stderr,"[ffs] cmd %u player %u %08x %08x %08x\n",id,a0,b.dma_read32(ds::Cpu::ARM9,p+12),b.dma_read32(ds::Cpu::ARM9,p+16),b.dma_read32(ds::Cpu::ARM9,p+20));
+      }
+      if(!next)break;
+      p=next;
+    }
+    auto& io=copy->io;auto& out=io.cpu_io[0].fifo_out;
+    if(first && !out.full()){
+      const bool wasEmpty=out.empty();
+      out.push(((first&0x3FFFFFF)<<6)|7);
+      if(wasEmpty && (io.cpu_io[1].ipc_fifo_cnt&0x400))io.request_irq(ds::Cpu::ARM7,ds::io::IRQ_IPC_RECV);
+    }
+  }
+}
 
 int current_bgm(){
   if(!game || !game->currentBgm)return -1;
@@ -1718,6 +1775,7 @@ bool begin(){
   copy->arm9->halted=true;
   int16_t drop[2048];
   while(copy->spu.take(drop,1024)>0){}
+  pushSeen=pushed();
   gain=1.f;gainStep=0.f;
   playing=true;
   return true;
@@ -1726,6 +1784,7 @@ bool begin(){
 void live_frame(){
   const int now=current_bgm();
   if(now<0)return;
+  if(playing)forward();
   const int settle=pk_nds_bgm_settle(game,read32);
   if(settle!=stateSeen){stateSeen=settle;stateFrames=0;}else ++stateFrames;
   const bool settled=settle>=0 && stateFrames>=SETTLE;

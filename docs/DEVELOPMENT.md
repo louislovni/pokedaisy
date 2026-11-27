@@ -4142,8 +4142,13 @@ ROM's MPlayStart (the first `bl` of `m4aSongNumStart`, found by the Android app'
 (0.98 correlation, 4 frames ahead), the START menu's sound and an Emerald wild battle's music and cry replayed.
 The DS core does the same for the music alone (`pd_ds::ffs`, the Android app's STEADY on DSperate: a second `ds::NDS`
 from the game's state with its ARM9 halted, the ARM7 FIFO drained and 0x027FFF96's flag cleared each frame, a new copy
-once a new song settles); its sound effects stay silent (their commands come from the stopped ARM9). Checked on Chaos
-Purple's Pallet Town: 0.98 against the 1x recording.
+once a new song settles). Checked on Chaos Purple's Pallet Town: 0.98 against the 1x recording. Its sound effects: the
+live game's sound commands (NitroSDK's SNDCommand chains, 0x18 bytes each in main RAM, their address sent on the IPC FIFO
+with tag 7; read back from the ARM9's FIFO ring, `fifo_out.data`, after each frame, the chain still whole then) are given
+the copy too, those of a player's (ids 0-10, arg0 the player) other than the music's player 0, the copy's chain relinked
+over the kept ones; the sequence (0x2000 bytes), its bank and the bank's wave archives copied into the copy where they
+differ (the games load a sound effect into the heap as it plays). Cries (channel commands) stay silent. Origin HeartGold,
+walking into walls at 4x: the bump heard, 0.59 against the 1x sound alone (other bumps over it).
 
 ## DS weather and seasons (Capsule's GBA core)
 
