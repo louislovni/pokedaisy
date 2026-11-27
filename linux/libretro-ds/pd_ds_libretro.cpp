@@ -1669,7 +1669,116 @@ RETRO_API bool retro_unserialize(const void* data,size_t n){
   if(ok){pd_ds::clear_hud_focus();pd_ds::clear_field_actions();pd_ds::flyJob={};pd_ds::flyPicker=pd_ds::heldQuickConfirm=false;pd_ds::companion=pd_ds::quickOpen=false;pd_ds::shell.picker=-1;pd_ds::shell.summary=false;pd_ds::shell.details=false;pd_ds::shell.dexEntry=0;pd_ds::shell.guideLoadedPage=-1;pd_ui_guide_reset(&pd_ds::shell.frame);pd_ds::shell.placeRow=pd_ds::shell.mapAction=-1;pd_ds::screen_override=0;pd_ds::snapshot={};pd_ds::repelFull=0;pd_ds::tick=0;pd_ds::scene.reset();pd_ds::arrangement={};pd_ds::manualTouch=pd_ds::fieldValid=pd_ds::fieldMenuFlow=false;pd_ds::companionHold=0;}
   return ok;
 }
-RETRO_API void retro_unload_game(){pd_ds::wide::stop();pd_ds::wide::mx=pd_ds::wide::my=pd_ds::wide::myT=pd_ds::wide::myB=pd_ds::wide::clearBelow=pd_ds::wide::hudTop=0;pd_ds::wide::fB=1;pd_ds::wide::outW=512;pd_ds::wide::outH=384;ds_unload_game();pd_ds::clear();}
+// FF SOUND for the DS games (the Android app's STEADY, pk_nds_music.cpp, on DSperate): fast-forward heard at 1x, the
+// music only. A second machine from the game's state, its ARM9 halted for good (no interrupt left to wake it): the game's
+// logic stops, the ARM7's sound driver plays on, once a frame of real time. A new song (the sound system's current BGM)
+// makes a new copy once it's settled (pk_nds_bgm_settle: no fade running, its player not paused); a song going (0)
+// fades the copy out. Sound effects aren't heard (their commands come from the stopped ARM9).
+namespace pd_ds::ffs {
+std::unique_ptr<ds::NDS> copy;
+bool on=false, playing=false, broken=false;
+int bgm=-1, wait=-1, state=-1, stateSeen=-1, stateFrames=0;
+float gain=1.f, gainStep=0.f;
+constexpr int SETTLE=4, MAX_WAIT=300, FADE=30;
+
+int current_bgm(){
+  if(!game || !game->currentBgm)return -1;
+  const uint32_t depth=game->bgmDepth?read32(game->bgmDepth):0;
+  if(depth>7)return -1;
+  return int(read32(game->currentBgm+0x1C*depth)&0xFFFF);
+}
+bool begin(){
+  playing=false;
+  if(!copy){
+    copy=std::make_unique<ds::NDS>();
+    const std::string sys=dir(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY);
+    auto in_sys=[&](const char* name){
+      const std::string p=sys+"/"+name;
+      FILE* f=sys.empty()?nullptr:std::fopen(p.c_str(),"rb");
+      if(!f)return std::string();
+      std::fclose(f);
+      return p;
+    };
+    std::string err;
+    if(!copy->load_bios(in_sys("bios9.bin"),in_sys("bios7.bin"),in_sys("firmware.bin"),{},&err)){copy.reset();return false;}
+    copy->reset();
+    if(!copy->load_rom(rom_path)){copy.reset();return false;}
+    copy->setup_direct_boot();
+  }
+  ds::state::Writer w;
+  std::string err;
+  if(!nds->save_state(w,err))return false;
+  ds::state::Reader r(w.data().data(),w.data().size());
+  if(!copy->load_state(r,err)){
+    log(RETRO_LOG_WARN,"PokeDaisy DS: FF sound copy refused: %s\n",err.c_str());
+    copy.reset();
+    return false;
+  }
+  copy->io.cpu_io[0].ime=0;copy->io.cpu_io[0].ie=0;
+  copy->arm9->halted=true;
+  int16_t drop[2048];
+  while(copy->spu.take(drop,1024)>0){}
+  gain=1.f;gainStep=0.f;
+  playing=true;
+  return true;
+}
+// Each of the game's frames while FF runs.
+void live_frame(){
+  const int now=current_bgm();
+  if(now<0)return;
+  const int settle=pk_nds_bgm_settle(game,read32);
+  if(settle!=stateSeen){stateSeen=settle;stateFrames=0;}else ++stateFrames;
+  const bool settled=settle>=0 && stateFrames>=SETTLE;
+  if(!playing && wait<0)wait=SETTLE;
+  else if(playing && now!=bgm){
+    if(now==0){if(gainStep==0.f && gain>0.f)gainStep=gain/FADE;}
+    else wait=0;
+  }else if(playing && wait<0 && settled && settle!=state){
+    if((settle&0xFFFF)==0){if(gainStep==0.f && gain>0.f)gainStep=gain/FADE;}
+    else wait=SETTLE;
+    state=settle;
+  }
+  bgm=now;
+  if(wait>=0 && ++wait>SETTLE && (settled || wait>MAX_WAIT)){
+    wait=-1;
+    state=settle;
+    if(!begin())broken=true;
+  }
+}
+int audio(int16_t* out,int maxFrames){
+  if(!playing)return 0;
+  ds::NDS& n=*copy;
+  // What the ARM7 sends the stopped ARM9 taken off the FIFO (full, the driver waits for room for good), and the shared
+  // flag the ARM9 clears each frame cleared (set, the ARM7 spins): pk_nds_music.cpp's drainArm7Fifo / releaseArm7Flag.
+  for(int i=0;i<16 && !(n.bus.read16(ds::Cpu::ARM9,0x04000184)&0x100);++i)n.bus.read32(ds::Cpu::ARM9,0x04100000);
+  const uint16_t flag=n.bus.read16(ds::Cpu::ARM7,0x027FFF96);
+  if(flag&1)n.bus.write16(ds::Cpu::ARM7,0x027FFF96,flag&~1);
+  n.gpu.set_frame_skip(true);
+  n.run_frame();
+  const int got=int(n.spu.take(out,size_t(maxFrames)));
+  if(gainStep>0.f || gain<1.f){
+    const float from=gain,to=std::max(0.f,gain-gainStep);
+    for(int i=0;i<got;++i){
+      const float g=from+(to-from)*float(i)/float(std::max(1,got));
+      out[i*2]=int16_t(out[i*2]*g);out[i*2+1]=int16_t(out[i*2+1]*g);
+    }
+    gain=to;
+  }
+  return got;
+}
+void reset(){playing=false;bgm=-1;wait=-1;state=stateSeen=-1;stateFrames=0;}
+}
+RETRO_API bool retro_pd_ff_sound(bool want){
+  using namespace pd_ds;
+  const bool can=game && game->currentBgm && !ffs::broken;
+  if(!want || !can){if(ffs::on)ffs::reset();ffs::on=false;return can;}
+  ffs::on=true;
+  return true;
+}
+RETRO_API int retro_pd_ff_audio(int16_t* out,int maxFrames){
+  return pd_ds::ffs::on?pd_ds::ffs::audio(out,maxFrames):0;
+}
+RETRO_API void retro_unload_game(){pd_ds::ffs::reset();pd_ds::ffs::copy.reset();pd_ds::ffs::on=pd_ds::ffs::broken=false;pd_ds::wide::stop();pd_ds::wide::mx=pd_ds::wide::my=pd_ds::wide::myT=pd_ds::wide::myB=pd_ds::wide::clearBelow=pd_ds::wide::hudTop=0;pd_ds::wide::fB=1;pd_ds::wide::outW=512;pd_ds::wide::outH=384;ds_unload_game();pd_ds::clear();}
 RETRO_API void retro_run(){
   if(!nds)return;
   input_poll_cb();
@@ -1707,6 +1816,7 @@ RETRO_API void retro_run(){
     const double r0=pd_ds::perfOn||pd_ds::ownSkip?pd_ds::perf_now():0;
     pd_ds::runStart=r0;
     ds_run();
+    if(pd_ds::ffs::on)pd_ds::ffs::live_frame();
     pd_ds::runStart=0;
     if(pd_ds::perfOn){
       pd_ds::perfRun+=pd_ds::perf_now()-r0;

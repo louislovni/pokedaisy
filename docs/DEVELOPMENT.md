@@ -4140,6 +4140,10 @@ ROM's MPlayStart (the first `bl` of `m4aSongNumStart`, found by the Android app'
 `PokemonCrySong` (built in RAM, 0x34 bytes) copied over first. A ROM without those signatures keeps the old sound
 (Capsule: silent, the host: sped up). Checked headless: FireRed's Pallet Town music under 4x matches the 1x recording
 (0.98 correlation, 4 frames ahead), the START menu's sound and an Emerald wild battle's music and cry replayed.
+The DS core does the same for the music alone (`pd_ds::ffs`, the Android app's STEADY on DSperate: a second `ds::NDS`
+from the game's state with its ARM9 halted, the ARM7 FIFO drained and 0x027FFF96's flag cleared each frame, a new copy
+once a new song settles); its sound effects stay silent (their commands come from the stopped ARM9). Checked on Chaos
+Purple's Pallet Town: 0.98 against the 1x recording.
 
 ## DS weather and seasons (Capsule's GBA core)
 
