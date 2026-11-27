@@ -1677,7 +1677,7 @@ RETRO_API bool retro_unserialize(const void* data,size_t n){
 namespace pd_ds::ffs {
 std::unique_ptr<ds::NDS> copy;
 bool on=false, playing=false, broken=false;
-int bgm=-1, wait=-1, state=-1, stateSeen=-1, stateFrames=0;
+int bgm=-1, waitFrames=-1, state=-1, stateSeen=-1, stateFrames=0;
 float gain=1.f, gainStep=0.f;
 constexpr int SETTLE=4, MAX_WAIT=300, FADE=30;
 
@@ -1729,18 +1729,18 @@ void live_frame(){
   const int settle=pk_nds_bgm_settle(game,read32);
   if(settle!=stateSeen){stateSeen=settle;stateFrames=0;}else ++stateFrames;
   const bool settled=settle>=0 && stateFrames>=SETTLE;
-  if(!playing && wait<0)wait=SETTLE;
+  if(!playing && waitFrames<0)waitFrames=SETTLE;
   else if(playing && now!=bgm){
     if(now==0){if(gainStep==0.f && gain>0.f)gainStep=gain/FADE;}
-    else wait=0;
-  }else if(playing && wait<0 && settled && settle!=state){
+    else waitFrames=0;
+  }else if(playing && waitFrames<0 && settled && settle!=state){
     if((settle&0xFFFF)==0){if(gainStep==0.f && gain>0.f)gainStep=gain/FADE;}
-    else wait=SETTLE;
+    else waitFrames=SETTLE;
     state=settle;
   }
   bgm=now;
-  if(wait>=0 && ++wait>SETTLE && (settled || wait>MAX_WAIT)){
-    wait=-1;
+  if(waitFrames>=0 && ++waitFrames>SETTLE && (settled || waitFrames>MAX_WAIT)){
+    waitFrames=-1;
     state=settle;
     if(!begin())broken=true;
   }
@@ -1766,7 +1766,7 @@ int audio(int16_t* out,int maxFrames){
   }
   return got;
 }
-void reset(){playing=false;bgm=-1;wait=-1;state=stateSeen=-1;stateFrames=0;}
+void reset(){playing=false;bgm=-1;waitFrames=-1;state=stateSeen=-1;stateFrames=0;}
 }
 RETRO_API bool retro_pd_ff_sound(bool want){
   using namespace pd_ds;
