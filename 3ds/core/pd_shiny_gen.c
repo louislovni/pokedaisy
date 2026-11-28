@@ -74,6 +74,7 @@ const struct pd_shiny_rom pd_shiny_roms[] = {
     {"91291aade04b4b111cd03ae7b6e2ff460e1edd8a", 16}, // Amethyst v1.4.1 (CFRU, its own 1 in 4096)
     {"b4776b82a4c7915d0fadeaa27e013523f99dfd94", 16}, // Unbound v2.1.1.1 (CFRU, its own 1 in 4096)
     {"0ce2a880aa097f1dce4e1db8ee513d0e82d15859", 16}, // Unbound v2.1.1.1 FR (CFRU, its own 1 in 4096)
+    {"b37ae6afc77fedb9a8df747f10e0f261ae9e0172", 16}, // Unbound v2.1.1.1 FR (patched) (CFRU, its own 1 in 4096)
     {"7dcdc7e280bc4631487e13dd37e6e0cea04adea6", 16}, // Lazarus v2.0 (its colours shift with the personality: 15 drew nearest the shiny, 16 the normal) (expansion)
     {"b9f4d332d30fc88c379f9e037f9eae3b2755ead4", 16}, // Emerald Seaglass v3.0 (expansion)
     {"3fa8e61ec1727cc51540c54677623f736a446e1b", 16}, // Too Many Types 2 v1.5.2 (expansion)

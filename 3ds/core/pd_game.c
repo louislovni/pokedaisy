@@ -513,6 +513,10 @@ static const struct known_rom KNOWN_ROMS[] = {
      PD_GUIDE_UNBOUND},
     {"0ce2a880aa097f1dce4e1db8ee513d0e82d15859", &PD_CONFIG_UNBOUND_FR, PD_GAME_FIRERED, "Pokémon Unbound",
      PD_GUIDE_UNBOUND},
+    // The French translation as another patch makes it (its header's revision byte 0x32): the same tables, the same
+    // French text at the same places (checked against the config's probe: "Graine", 0.7 m, 6.9 kg; Bulbizarre).
+    {"b37ae6afc77fedb9a8df747f10e0f261ae9e0172", &PD_CONFIG_UNBOUND_FR, PD_GAME_FIRERED, "Pokémon Unbound",
+     PD_GUIDE_UNBOUND},
     {"1d20091c4d936f5eb122db8780554dd0829ffb63", &PD_CONFIG_IMPERIUM, PD_GAME_EMERALD, "Pokémon Emerald Imperium",
      PD_GUIDE_IMPERIUM},
     {"3fa8e61ec1727cc51540c54677623f736a446e1b", &PD_CONFIG_TMT2, PD_GAME_EMERALD, "Pokémon Too Many Types 2",
