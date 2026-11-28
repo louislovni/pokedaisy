@@ -4219,7 +4219,8 @@ game's own cart when it's HG / SS, else the frontend's (`retro_pd_weather_cart`)
 stage before the HUD, or with EXPAND over the whole frame in `emit` (the margins too) before the wide HUD; the clouds' dim
 and a storm's lightning the GBA core's; the rain and thunder heard (NATURE) through the core's own
 `retro_set_audio_sample_batch` (DSperate's renamed `ds_set_audio_sample_batch`). Origin HeartGold's Pallet Town: found
-at 0x020F37C4, 540 headers, zone 49 outdoors; rain and storm drawn across the expanded frame. NATURE moved to `libretro/pd_nature.c`
+at 0x020F37C4, 540 headers, zone 49 outdoors; rain and storm drawn across the expanded frame. The clouds' dim is a table per channel (the
+upright frame is ~600k pixels: a frame took ~5 ms more under the rain headless). NATURE moved to `libretro/pd_nature.c`
 (`nat_after_run` / `nat_draw` / `nat_thunder` / `nat_mix`, the target giving the plot, the map's scroll and the feet) and
 runs on the DS core too: outdoors as above, the feet at the stage's (256, 196), the scroll from HeartGold / SoulSilver's
 player MapObject (fx32 x +0x70, z +0x78 off `cart::johtoField` -> +64 avatar -> +48 object; a world unit a DS pixel), so the
@@ -4278,3 +4279,16 @@ pushing a different file (only one at a time for now). SRAM persists to
 | `scripts/capture_fixture.sh`, `scripts/roms.conf`       | Captures a live EWRAM+IWRAM memory fixture for one ROM off the device.                                                                                             |
 | `app/src/test/resources/fixtures/<key>/`                | Captured `{ewram,iwram}.bin` + `README.txt` per ROM — replayed by the JVM decode tests, not committed ROMs/saves themselves.                                       |
 | `app/src/test/kotlin/.../companion/data/*DecodeTest.kt` | One regression test per supported ROM, decoding its fixture and asserting the known-real values.                                                                   |
+
+## DS core: FF frames not drawn, the battle strip held between panels (2026-11-28)
+
+FF's batches: the frontend calls `retro_pd_ff_sound` once per frame of real time (FF SOUND on or not), before that frame's
+game frames; the core counts the last batch's length and marks all but its last frame as skipped (DSperate's Skip::Frame
+`fs_behind`, restored after if it set it), and EXPAND's slices skip their render on a frame DSperate won't draw (`latched`
+checks `will_skip_frame`). Upright EXPAND at 4x drew four whole frames, the tall slices the most, for one shown: the FF
+sound came late (a player's report, Origin HeartGold upright). Headless: 59 -> 39 ms a batch of four.
+
+Battle strip: between FIGHT and the moves the game's touch screen redraws for ~4 frames that read as neither panel
+(`DsBattlePanel::Native`): with the strip held (`holdStrip`, the last panel drawn not Native, no TOUCH_FADES: not a bag or
+the party fading in) the one-screen arrangement stays, where the game's lower screen floated in for those frames (Origin
+HeartGold, a player's report).

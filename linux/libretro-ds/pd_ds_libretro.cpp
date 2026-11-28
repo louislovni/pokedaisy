@@ -252,7 +252,8 @@ void on_submit(ds::gpu::Gpu3D& g,const ds::gpu::Vertex* const* v,int n,bool faci
   }
 }
 void swap(ds::gpu::Gpu3D& g,void*){for(auto& s:slices)if(s)s->wide_swap(g);}
-void latched(ds::gpu::Gpu3D& g,void*){for(auto& s:slices)if(s)s->wide_render(g);}
+// A frame DSperate won't draw (frame skip, FF's frames between two shown) draws no slices either.
+void latched(ds::gpu::Gpu3D& g,void*){if(nds->gpu.will_skip_frame())return;for(auto& s:slices)if(s)s->wide_render(g);}
 
 void stop(){
   if(nds){auto& g=nds->gpu3d;g.wide=ds::gpu::Gpu3D::WideHooks{};}
@@ -718,7 +719,11 @@ void choose_layout() {
     else if(topBlank || (fieldApp&&!(bits&PK_NDS_FIELD_TOUCH_ONLY)))
       arrangement={{},{},false,false,true};
   }
-  if(battleActive && !scene.dark)arrangement={{0,0,512,384},{}};
+  // Between two of the strip's panels (FIGHT -> the moves: the game's touch screen redraws for a few frames, read as
+  // neither) the one screen stays: the strip held on it, not the game's lower screen floating in for 4 frames (Origin
+  // HeartGold, a player's report). A bag or the party (a touch screen the game fades in) still comes up.
+  const bool between=inBattle && holdStrip>0 && drawnBattle.panel!=DsBattlePanel::Native && !(bits&PK_NDS_FIELD_TOUCH_FADES);
+  if((battleActive || between) && !scene.dark)arrangement={{0,0,512,384},{}};
   layout=mode==DS_BOTTOM?1:mode==DS_SIDE?2:mode==DS_STACKED?3:0;
   if(scene.hud&&!scene.dark&&!(bits&PK_NDS_FIELD_LOCKED)){std::memcpy(fieldFrame,nds->gpu.framebuffer(0),sizeof fieldFrame);fieldValid=true;++fieldRevision;}
 }
@@ -855,16 +860,22 @@ void draw(uint32_t* b,unsigned stride,int x,int y,int w,int h,int scale,float fe
       else flashAt=-1;
     }
   }else flashAt=-1;
-  if(mul[0]!=256||mul[1]!=256||mul[2]!=256)
+  if(mul[0]!=256||mul[1]!=256||mul[2]!=256){
+    // A table per channel (the frame is up to ~600k pixels upright: three lookups each, no multiply).
+    static uint32_t lut[3][256];
+    static int lutFor[3]={-1,-1,-1};
+    for(int c=0;c<3;++c)if(lutFor[c]!=mul[c]){
+      lutFor[c]=mul[c];
+      for(unsigned v=0;v<256;++v)lut[c][v]=std::min(255u,v*unsigned(mul[c])>>8)<<(16-8*c);
+    }
     for(int yy=0;yy<h;++yy){
       uint32_t* row=b+unsigned(y+yy)*stride+x;
       for(int xx=0;xx<w;++xx){
         const uint32_t c=row[xx];
-        const unsigned r=std::min(255u,((c>>16)&255)*unsigned(mul[0])>>8),g=std::min(255u,((c>>8)&255)*unsigned(mul[1])>>8),
-                       bl=std::min(255u,(c&255)*unsigned(mul[2])>>8);
-        row[xx]=(r<<16)|(g<<8)|bl;
+        row[xx]=lut[0][(c>>16)&255]|lut[1][(c>>8)&255]|lut[2][c&255];
       }
     }
+  }
   buf=b;bufStride=stride;ox=x;oy=y;bw=w;bh=h;
   if(kind>=0){
     const dsw_target t={plot,w,h,scale,camX,camY};
@@ -2014,8 +2025,13 @@ int audio(int16_t* out,int maxFrames){
 }
 void reset(){playing=false;bgm=-1;waitFrames=-1;state=stateSeen=-1;stateFrames=0;}
 }
+// FF's batches (the frontend calls retro_pd_ff_sound before each frame of real time's game frames, whether FF SOUND is on
+// or not): all but the last of a batch as long as the last one aren't drawn (DSperate's frame skip, and no EXPAND slices),
+// as only the last is shown - x4 drew four whole frames (EXPAND's margins upright the most) for one, its sound late.
+namespace pd_ds::ffs { int batchSeen=0, batchLen=0; }
 RETRO_API bool retro_pd_ff_sound(bool want){
   using namespace pd_ds;
+  ffs::batchLen=ffs::batchSeen;ffs::batchSeen=0;
   const bool can=game && game->currentBgm && !ffs::broken;
   if(!want || !can){if(ffs::on)ffs::reset();ffs::on=false;return can;}
   ffs::on=true;
@@ -2071,6 +2087,13 @@ RETRO_API void retro_run(){
       pd_ds::skipRun=pd_ds::frameDebt>pd_ds::skipDebt && pd_ds::skipRun<2?pd_ds::skipRun+1:0;
       fs_behind=pd_ds::skipRun>0;
       pd_ds::frameWork=pd_ds::frameBudget;   // a frame that never presents neither adds nor pays
+    }
+    if(fs_mode==Skip::Frame){
+      static bool forced=false;   // fs_behind set here (not by the frontend's own frame skip)
+      ++pd_ds::ffs::batchSeen;
+      const bool between=pd_ds::ffs::batchLen>1 && pd_ds::ffs::batchSeen<pd_ds::ffs::batchLen;
+      if(between){forced=forced||!fs_behind;fs_behind=true;}
+      else if(forced){forced=false;fs_behind=pd_ds::ownSkip&&pd_ds::skipRun>0;}
     }
     const double r0=pd_ds::perfOn||pd_ds::ownSkip?pd_ds::perf_now():0;
     pd_ds::runStart=r0;
