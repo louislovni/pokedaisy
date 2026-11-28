@@ -55,7 +55,8 @@ add_library(pd_ds_presentation STATIC companion_ui.cpp layout.cpp battle_strip.c
   ${ROOT}/linux/dsperate/map_view.cpp
   ${APP}/pk_nds_field.cpp
   ${ROOT}/libretro/pd_dsweather.c
-  ${ROOT}/libretro/pd_nature.c)
+  ${ROOT}/libretro/pd_nature.c
+  ${ROOT}/libretro/pd_bwsprite.c)
 add_dependencies(pd_ds_presentation ds-app-data)
 target_include_directories(pd_ds_presentation PUBLIC ${CMAKE_CURRENT_BINARY_DIR} ${LR}/include
   ${ROOT}/3ds/core ${ROOT}/linux/dsperate ${APP} ${ROOT}/libretro)

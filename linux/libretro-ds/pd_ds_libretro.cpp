@@ -49,6 +49,7 @@ extern "C" {
 #include "pd_tables.h"
 #include "pd_dsweather.h"
 #include "pd_nature.h"
+#include "pd_bwsprite.h"
 #include "pd_icon.h"
 }
 namespace cart { extern uint32_t johtoField; }
@@ -352,6 +353,7 @@ uint32_t ambientRow(const uint32_t* thumb,unsigned W,unsigned H,unsigned Y,unsig
 }
 
 namespace sky { void draw(uint32_t* buf,unsigned stride,int x,int y,int w,int h,int scale,float feetX,float feetY); extern bool shown; }
+extern "C++" { namespace bwb { void draw(uint32_t* buf,unsigned stride,int x,int y,int w,int h); } }
 void emit(const uint32_t* px,bool field3D){
   using namespace wide;
   if(mx<=0&&my<=0){geometry(512,384);submit(px,512,384);return;}
@@ -1301,6 +1303,8 @@ void present_frame(const void* data) {
              fieldValid?fieldFrame:nullptr,showStrip?draw_strip:noticeFrames?keep_composing:nullptr,&backdrop,fieldRevision);
   stageReady=true;stageMarked=false;
   if(perfOn)perfCompose+=perf_now()-c0;
+  // BATTLE SPRITES on the top screen, wherever it is on the stage.
+  if(arrangement.top.w>0)bwb::draw(stage,512,arrangement.top.x,arrangement.top.y,arrangement.top.w,arrangement.top.h);
   // DYNAMIC WEATHER on the one screen's field (EXPAND draws it in emit, past the screen's edges too).
   sky::shown=game && arrangement.top.x==0 && arrangement.top.y==0 && arrangement.top.w==512 && arrangement.top.h==384 &&
     arrangement.touch.w==0 && !arrangement.floating && !arrangement.modal && !battleActive && !wasInBattle && !scene.dark;
@@ -2037,6 +2041,142 @@ RETRO_API bool retro_pd_ff_sound(bool want){
   ffs::on=true;
   return true;
 }
+// ---- BATTLE SPRITES on the DS games (Capsule's, as the GBA core's: libretro/pd_bwsprite.c): Black / White's animated
+// pictures from the player's own cart in place of a Gen 4 game's still ones (HeartGold / SoulSilver, their hacks,
+// Platinum / Diamond / Pearl where their pictures are laid out the same). The game's pictures are Pokepics (pokeheartgold
+// include/pokepic.h): a PokepicManager of four 0xAC-byte Pokepics (+0 the active bit, +4 the template, +0x24 the draw
+// parameters: x / y centre, z, x / y offset; +0x30 hasVanished bit 0, dontDraw bit 11), their pictures in one 256 x 256
+// 4bpp texture (+0x2FC, 0x8000 bytes at +0x2F0: picture k's first frame at rows 80k, columns 0-79). The manager is found in
+// RAM by that shape once a battle shows; each frame dontDraw is set on the pictures drawn here for the game's frame and
+// put back after it (the game's state as it was), and the cart's picture drawn on the top screen standing where the
+// game's picture's lowest row was. Which species: the battle's (single battles: the player's side is the back picture,
+// left of the middle); none the cart lacks.
+extern "C++" {
+namespace pd_ds::bwb {
+uint32_t manager=0;            // 0 none found
+unsigned lastScan=0;
+std::string cart;
+struct Mon{bool on=false,back=false,shiny=false;int national=0,t=0,gap=-1,top=0;uint32_t chr=0;float x=0,y=0;bool hid=false;} mons[4];
+bool plausible(uint32_t m){
+  if(m<0x02000000||m+0x338>0x02400000)return false;
+  int active=0;
+  for(int k=0;k<4;++k){
+    const uint32_t p=m+k*0xAC,w0=read32(p);
+    if(!(w0&1))continue;
+    ++active;
+    const int16_t x=int16_t(read32(p+0x24)&0xFFFF),y=int16_t(read32(p+0x24)>>16);
+    if(x<-64||x>320||y<-64||y>256)return false;
+    if(read32(p+4)!=read32(p+0x14)||read32(p+8)!=read32(p+0x18))return false;   // the template and its backup
+  }
+  return active>0 && read32(m+0x2F0)==0x8000 && read32(m+0x2FC)>=0x02000000 && read32(m+0x2FC)<0x023F8000;
+}
+void find(){
+  manager=0;
+  const uint8_t* r=nds->bus.main_ram.get();
+  const size_t n=std::min<size_t>(nds->bus.main_ram_size(),0x400000);
+  for(size_t o=0;o+0x338<=n;o+=4){
+    // charSize 0x8000 at +0x2F0 and charRawData just past the manager's heap block: the rare part first.
+    if(r[o+0x2F0]!=0||r[o+0x2F1]!=0x80||r[o+0x2F2]!=0||r[o+0x2F3]!=0)continue;
+    if(plausible(uint32_t(0x02000000+o))){manager=uint32_t(0x02000000+o);return;}
+  }
+}
+int national_of(int species){
+  const auto* o=ds_origin();
+  if(o&&o->usEngine&&species>493){
+    for(size_t n=0;n<o->dexOrder.size();++n)if(o->dexOrder[n]==species)return int(n);
+    return 0;
+  }
+  return species;
+}
+// The empty rows under (above: [over]) picture [k]'s first frame in the texture.
+int gap_of(int k,bool over=false){
+  const uint32_t tex=read32(manager+0x2FC);
+  for(int i=0;i<80;++i){
+    const int row=over?i:79-i;
+    const uint32_t a=tex+uint32_t(k*80+row)*128;
+    for(int x=0;x<40;x+=4)if(read32(a+x))return i;
+  }
+  return 80;
+}
+bool wanted(){return bws_ready()&&game&&companionGame!=DsGame::Unsupported&&game->gen!=5;}
+// Before the game's frame: the pictures drawn here aren't the game's to draw.
+void before_run(){
+  for(auto& m:mons)m.hid=false;
+  if(!manager||!wanted())return;
+  for(int k=0;k<4;++k){
+    if(!mons[k].on)continue;
+    const uint32_t a=manager+k*0xAC+0x54;
+    const uint32_t v=read32(a);
+    if(v&0x800)continue;   // the game's own dontDraw: it isn't shown at all
+    nds->bus.dma_write32(ds::Cpu::ARM9,a,v|0x800);
+    mons[k].hid=true;
+  }
+}
+// After it: dontDraw as the game had it, and what's on screen now.
+void after_run(){
+  for(int k=0;k<4;++k)if(mons[k].hid&&manager){
+    const uint32_t a=manager+k*0xAC+0x54;
+    nds->bus.dma_write32(ds::Cpu::ARM9,a,read32(a)&~0x800u);
+    mons[k].hid=false;
+  }
+  const int bits=wanted()?pk_nds_field_state(game,read32,nullptr,0):0;
+  if(!(bits&PK_NDS_FIELD_BATTLE)){manager=0;for(auto& m:mons)m=Mon{};return;}
+  if(!manager||!plausible(manager)){
+    manager=0;
+    for(auto& m:mons)m=Mon{};
+    if(tick-lastScan<30)return;
+    lastScan=tick;
+    find();
+    if(!manager)return;
+  }
+  for(int k=0;k<4;++k){
+    Mon& m=mons[k];
+    const uint32_t p=manager+k*0xAC,w0=read32(p),flags=read32(p+0x54);
+    if(!(w0&1)||(flags&1)){m.on=false;m.chr=0;continue;}       // not there, or vanished (a Poke Ball, a switch)
+    const uint32_t chr=read32(p+4)>>16;   // the template: narc, character file, palette file, species, ...
+    const int16_t x=int16_t(read32(p+0x24)&0xFFFF),y=int16_t(read32(p+0x24)>>16);
+    const int16_t dx=int16_t(read32(p+0x2C)&0xFFFF),dy=int16_t(read32(p+0x2C)>>16);
+    m.x=float(x+dx);m.y=float(y+dy);
+    m.back=x<128;
+    if(chr!=m.chr){
+      m.chr=chr;m.t=0;m.gap=gap_of(k);m.top=gap_of(k,true);
+      // The species: the template's, else from its picture's file - the games' pokegra has 6 files a species (back
+      // female / male, front female / male, normal / shiny palette), Origin HeartGold's 8 (each picture its palette
+      // next to it, the shiny ones after).
+      const unsigned species=read32(p+8)>>16,pal=read32(p+8)&0xFFFF;
+      const bool eight=ds_origin()!=nullptr;
+      const unsigned guess=species?species:eight?chr/8:chr/6;
+      m.national=guess>0&&guess<2000?national_of(int(guess)):0;
+      m.shiny=eight?pal!=chr+1:pal%6==5;
+    }
+    ++m.t;
+    m.on=m.national>0&&bws_has(m.national,m.back);
+  }
+}
+void draw(uint32_t* buf,unsigned stride,int x,int y,int w,int h){
+  if(!manager||!wanted())return;
+  const float scale=w/256.f;
+  for(const auto& m:mons){
+    if(!m.on)continue;
+    // Where the game's picture stood: its lowest row (80 x 80 about its centre).
+    const float ground=m.y-40+80-float(std::max(0,m.gap));
+    // The player's own from behind: the text box (from row 144) covers its lower part, as the game's own.
+    const float bottom=m.back?std::min(ground+1,144.f):ground+1;
+    const int clip[4]={x,y,x+w,std::min(y+h,y+int(bottom*scale))};
+    const float s=scale*(m.back?2.f:1.f);   // a back picture: the DS games draw it 2x (Black / White too)
+    // A foe stands on the game's picture's ground; the player's own (seen from behind, mostly under the text box) has its
+    // head where the game's picture's top was.
+    const float feet=m.back?m.y-40+float(m.top)-float(bws_top(m.national,true))*2.f:ground;
+    bws_draw(m.national,m.back,m.shiny,m.t,buf,int(stride),clip,x+m.x*scale,y+feet*scale,s);
+  }
+}
+}
+}
+RETRO_API void retro_pd_battle_sprites(const char* ndsPath){
+  if(!ndsPath||!*ndsPath)bws_close();
+  else bws_open(ndsPath);
+  pd_ds::bwb::manager=0;
+}
 RETRO_API void retro_set_audio_sample_batch(retro_audio_sample_batch_t cb){
   pd_ds::sky::out=cb;
   ds_set_audio_sample_batch(pd_ds::sky::audio);
@@ -2097,7 +2237,9 @@ RETRO_API void retro_run(){
     }
     const double r0=pd_ds::perfOn||pd_ds::ownSkip?pd_ds::perf_now():0;
     pd_ds::runStart=r0;
+    pd_ds::bwb::before_run();
     ds_run();
+    pd_ds::bwb::after_run();
     pd_ds::sky::update();
     if(pd_ds::ffs::on)pd_ds::ffs::live_frame();
     pd_ds::runStart=0;

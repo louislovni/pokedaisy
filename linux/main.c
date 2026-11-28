@@ -1938,8 +1938,7 @@ static void run_game(const char *path, int maxFrames, const char *shot, bool fro
 #ifdef POCKET_PURE
   // LOOK / WEATHER AND LIGHTS: what the scene is and where the night's lights are (the GBA core's, else none).
   fx_core((int (*)(int *, int))dlsym(core.dl, "retro_pd_scene"), (int (*)(float *, int))dlsym(core.dl, "retro_pd_lights"));
-  if (!dsGame)
-    battle_sprites_follow(path);
+  battle_sprites_follow(path); // every game: the DS core draws them in a Gen 4 game's battles too
   ambience_follow(path); // every game: the DS core draws DYNAMIC WEATHER too
 #endif
 #ifdef CAPSULE_COOP

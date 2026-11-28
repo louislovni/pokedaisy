@@ -4292,3 +4292,19 @@ Battle strip: between FIGHT and the moves the game's touch screen redraws for ~4
 (`DsBattlePanel::Native`): with the strip held (`holdStrip`, the last panel drawn not Native, no TOUCH_FADES: not a bag or
 the party fading in) the one-screen arrangement stays, where the game's lower screen floated in for those frames (Origin
 HeartGold, a player's report).
+
+## BATTLE SPRITES on the DS core (2026-11-28)
+
+`pd_ds::bwb` (pd_ds_libretro.cpp, with libretro/pd_bwsprite.c linked in): a Gen 4 game's battle pictures are Pokepics
+(pokeheartgold include/pokepic.h): a PokepicManager of four 0xAC-byte Pokepics (+0 active bit; +4 the template: narc,
+character file, palette file, species; +0x24 the draw parameters: x / y centre, z, +0x2C x / y offset, +0x54 the flags:
+hasVanished bit 0, dontDraw bit 11), its pictures in one 256 x 256 4bpp texture (+0x2FC, its size 0x8000 at +0x2F0:
+picture k's first frame at rows 80k, columns 0-79). The manager is found by that shape in main RAM once a battle shows
+(the 0x8000 first, every 30 frames while none). Each frame dontDraw is set on the pictures drawn here just for the game's
+frame and cleared after it (the game's state as it was between frames; one the game hid itself is left alone), and the
+Black / White cart's picture drawn on the top screen in the stage: a foe standing on the game's picture's lowest row, the
+player's back picture 2x with its head where the game's picture's top was, clipped at the text box (row 144). The species:
+the template's, else its character file's (6 files a species; Origin HeartGold's 8), hg-engine's ids through dexOrder; the
+shiny: the palette file (the 5th of 6; Origin's: not the one after the picture). Origin HeartGold's Hoothoot and Pikachu:
+found at 0x022DD138, animated through Tail Whip and Peck. Over the game's own picture only: a banner the game draws over
+its picture (an ability's) is under the cart's.
